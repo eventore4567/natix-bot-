@@ -48,17 +48,40 @@ async def resetai(interaction: discord.Interaction):
 
 @bot.event
 async def on_message(message: discord.Message):
-    if message.author.bot or bot.user is None or bot.user not in message.mentions:
+    if message.author.bot or bot.user is None:
         return
-    question = message.content.replace(f"<@{bot.user.id}>", "").replace(f"<@!{bot.user.id}>", "").strip()
+
+    content = message.content.strip()
+    mentioned = bot.user in message.mentions
+    starts_with_natix = content.lower().startswith("natix") and (
+        len(content) == 5 or not content[5].isalnum()
+    )
+    if not mentioned and not starts_with_natix:
+        return
+
+    if mentioned:
+        question = content.replace(f"<@{bot.user.id}>", "").replace(
+            f"<@!{bot.user.id}>", ""
+        ).strip()
+    else:
+        question = content[5:].lstrip(" ,:!?-").strip()
+
     if not question:
         return
+
     try:
         async with message.channel.typing():
             reply = await respond(message.author.id, message.channel.id, question)
-        await message.reply(reply, mention_author=False, allowed_mentions=discord.AllowedMentions.none())
+        await message.reply(
+            reply, mention_author=False,
+            allowed_mentions=discord.AllowedMentions.none()
+        )
     except Exception:
-        logging.exception("AI mention failed")
+        logging.exception("AI message response failed")
+        try:
+            await message.reply("L'IA est temporairement indisponible.", mention_author=False)
+        except discord.HTTPException:
+            pass
 
 @bot.event
 async def on_ready():
