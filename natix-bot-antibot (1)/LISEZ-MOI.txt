@@ -1,0 +1,100 @@
+MODO BOT - Bot de moderation Discord (discord.js v14)
+
+1) Le token du bot est deja dans le fichier .env (ne le partage avec personne)
+2) Sur le Developer Portal, onglet Bot, active :
+   - Server Members Intent
+   - Message Content Intent
+3) Heberge sur un hebergeur Node.js (Katabump, etc.) :
+   - fichier principal : index.js
+   - modules : discord.js dotenv (ou "npm install")
+   - lance : node index.js
+4) Sur le serveur Discord : monte le role du bot tout en haut, puis tape /setlogs et /aide
+
+IMPORTANT : un seul programme a la fois peut utiliser le token
+(couper Bot Designer ou toute autre copie du bot).
+
+PERMISSIONS DES COMMANDES (version corrigee)
+- Commandes PUBLIQUES (visibles et utilisables par @everyone) : /aide /userinfo /serverinfo
+  Liste dans src/commandPolicy.js.
+- Toutes les autres commandes (/ban /tempban /unban /kick /mute /unmute /warn /warns /unwarn /clearwarns
+  /clear /lock /unlock /slowmode /setlogs /automod /diagnostic) gardent leur permission par defaut
+  (ex: Bannir des membres) : Discord les cache aux membres sans cette permission, et le bot la reverifie
+  a l'execution. Une commande non listee publique SANS permission fait refuser le demarrage du bot.
+- Le bot ne contourne JAMAIS les refus definis par les admins du serveur (permissions de salon, categorie,
+  Parametres du serveur > Integrations).
+- /diagnostic [membre] [salon] (permission Gerer le serveur) : explique pourquoi un membre ne peut pas utiliser
+  les commandes et indique le reglage Discord a corriger.
+- Tests : npm test
+
+REGLAGES DISCORD A FAIRE MANUELLEMENT SI /diagnostic LE DEMANDE
+1. Salon (ex: #commandes) > Modifier > Permissions > @everyone > "Utiliser les commandes d'application" = vert.
+   Verifier aussi la categorie du salon (si le salon est synchronise avec elle).
+2. Parametres du serveur > Roles > @everyone > "Utiliser les commandes d'application" = active.
+3. Parametres du serveur > Integrations > (le bot) : pas de refus pour @everyone, salons autorises,
+   ou bouton "Reinitialiser les permissions".
+4. Invitation du bot : Developer Portal > OAuth2 > URL Generator > scopes "bot" ET "applications.commands".
+5. Le membre redemarre Discord (Ctrl+R) apres un changement.
+
+
+ROLES DE WARN
+- A chaque warn, le membre recoit le role "Warn 1", "Warn 2", etc. (cree automatiquement, l'ancien est retire).
+- /unwarn et /clearwarns mettent le role a jour.
+- Le bot a besoin de la permission "Gerer les roles", et son role doit etre au-dessus des roles Warn.
+
+
+EMOJIS PERSONNALISES (identite visuelle)
+- 33 emojis (30 PNG + 3 GIF animes) dans assets/emojis/, tous au meme style (badge rond + pictogramme blanc).
+- Gestion centralisee : src/emojis.js (catalogue + chargement + emojis Unicode de secours). Le reste du code
+  n'ecrit jamais d'emoji en dur : il appelle emoji('success'), emoji('denied'), emoji('sanction')...
+- Installation : AUCUNE action. Au demarrage le bot lit ses "emojis d'application" (Developer Portal > ton bot >
+  onglet Emojis), televerse automatiquement ceux qui manquent (noms nx_success, nx_error...) et memorise leurs
+  identifiants. Ils fonctionnent sur tous les serveurs et en MP. Le log de demarrage indique "Emojis personnalises : 33/33".
+  (Installation manuelle possible : glisser les fichiers de assets/emojis dans l'onglet Emojis du Developer Portal,
+  en gardant le nom nx_<nom du fichier>.)
+- Si un emoji est indisponible (pas televerse, API en panne, bot sans "Utiliser des emojis externes" dans un salon
+  de logs...), le bot utilise l'emoji Unicode equivalent : jamais de :nom: casse a l'ecran.
+- Options (.env) : EMOJI_AUTO_UPLOAD=false (ne rien televerser) ; EMOJIS_DISABLED=true (tout en Unicode).
+- Remplacer une image : supprime l'emoji nx_xxx dans le Developer Portal, depose la nouvelle image dans
+  assets/emojis/ (meme nom) et redemarre : il est retelecharge. Pour regenerer tout le jeu : assets/source/gen_emojis.py.
+- Le statut du bot (« le serveur 👀 ») reste en Unicode : Discord n'accepte pas d'emoji personnalise dans le statut d'un bot.
+- Tests : npm test (inclut la verification des images et des cas "emoji indisponible").
+
+
+GIVEAWAYS (/giveaway, permission "Gerer le serveur")
+- /giveaway creer lot duree [gagnants] [salon]  : lance un giveaway (message avec bouton "Participer"). Duree : 30m, 2h, 1j, 1sem...
+  Re-cliquer sur le bouton retire sa participation. Les boutons survivent aux redemarrages (donnees dans data/db.json).
+- /giveaway terminer [id]   : termine tout de suite et tire les gagnants (sinon fin automatique a l'heure prevue).
+- /giveaway reroll [id] [gagnants] [remplacer] : nouveau tirage parmi les participants restants. Un ancien gagnant, un blackliste,
+  un bot ou un membre parti ne peut jamais etre retire. "remplacer" = remplace un gagnant precis. Sans id : dernier giveaway termine.
+- /giveaway annuler [id] / /giveaway liste.
+- /giveaway blacklist ajouter membre [raison] : interdit la participation ET donne le role "Blacklist Giveaway" (cree automatiquement).
+  Le membre est retire des giveaways en cours ; s'il quitte puis revient, il retrouve le role. /giveaway blacklist retirer = autorise a nouveau
+  et retire le role. /giveaway blacklist liste. Avoir le role a la main bloque aussi la participation.
+- VIP : les membres ayant le role VIP ont 2x plus de chances (poids 2 contre 1 au tirage). Role = celui regle par
+  /giveaway config role_vip, sinon un role nomme "VIP". /giveaway config affiche les reglages (role_blacklist aussi modifiable).
+- Le bot a besoin de "Gerer les roles" et son role doit etre AU-DESSUS du role Blacklist Giveaway (sinon la blacklist reste active mais le role n'est pas pose).
+- Tests : npm test (inclut le tirage, le x2 VIP, la blacklist, le reroll).
+
+
+INVITE TRACKER (/invites public, /invitetracker permission "Gerer le serveur")
+- Le bot sait quelle invitation a amene chaque nouveau membre et compte les invitations de chacun.
+  Total = reelles + bonus - parties. Les comptes "fake" (crees depuis moins de 7 jours, reglable) ne comptent pas.
+  Un membre qui part est retire du total de celui qui l'avait invite ; s'il revient, il est recompte (1 invitation nette, pas 2).
+- /invites voir [membre] : reelles / parties / fake / bonus.   /invites classement : top 10.   /invites invitepar [membre] : qui l'a invite.
+- /invitetracker config [actif] [salon] [retirer_salon] [age_min] : etat et reglages. Le salon (optionnel) recoit
+  "X a rejoint, invite par Y (N invitations)" et les departs. L'info apparait aussi dans le log d'arrivee/depart existant.
+- /invitetracker bonus membre nombre (negatif = retire) / reset membre / resettout confirmer:True.
+- Cas geres : invitation a usage unique, lien personnalise du serveur ("via le lien personnalise"), arrivees simultanees,
+  auto-invitation (non comptee), bots, invitation introuvable.
+- A FAIRE : le bot doit avoir la permission "Gerer le serveur" (sinon il ne peut pas lire les invitations ; /invitetracker config le signale).
+  Aucun intent a activer en plus (GuildInvites n'est pas privilegie). Le suivi commence au demarrage du bot : les membres deja
+  presents avant n'ont pas d'inviteur connu.
+- Fichiers : src/invites.js (logique), src/commands/invites.js (commandes), test/invites.test.js.
+
+
+ANTI-BOT (/unbot, permission "Gerer le serveur")
+- /unbot activate : tout BOT qui rejoint le serveur est expulse automatiquement (et logue dans le salon /setlogs, avec la
+  personne qui l'a ajoute si le bot peut lire le journal d'audit).   /unbot desactivate : l'ajout de bots est a nouveau autorise.
+- Reglage par serveur, conserve au redemarrage. Desactive par defaut. Ne touche jamais au bot lui-meme.
+- Le bot a besoin de "Expulser des membres" et son role doit etre AU-DESSUS du role du bot ajoute (+ "Voir les logs du serveur" pour afficher l'ajouteur).
+- Fichiers : src/antibot.js, src/commands/unbot.js, test/antibot.test.js.
