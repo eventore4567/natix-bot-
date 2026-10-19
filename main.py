@@ -8,8 +8,8 @@ from discord import app_commands
 from openai import AsyncOpenAI
 
 logging.basicConfig(level=logging.INFO)
-TOKEN = os.environ["DISCORD_TOKEN"]
-ai = AsyncOpenAI(api_key=os.environ["OPENAI_API_KEY"], timeout=20.0, max_retries=1)
+TOKEN = os.environ["DISCORD_TOKEN"].strip()
+ai = AsyncOpenAI(api_key=os.environ["OPENAI_API_KEY"].strip(), timeout=20.0, max_retries=1)
 MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
 intents = discord.Intents.default()
 intents.message_content = True
