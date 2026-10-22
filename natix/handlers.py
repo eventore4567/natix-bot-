@@ -104,7 +104,14 @@ def render_ticket(store, ticket):
         order = store.order(ticket["guild"], int(ticket["ref"] or 0))
         body = V.order_body(order, s) if order else ticket["subject"]
         if order:
+            if order["state"] in ("pending", "accepted"):
+                rows += V.payment_section(s, order["total_cents"], ticket["paid"])
             rows.append(V.order_row(order))
+    elif ticket["kind"] == "promo":
+        body = ticket["subject"]
+        plan = store.plan(ticket["guild"], ticket["ref"])
+        if plan:
+            rows += V.payment_section(s, plan["price_cents"], ticket["paid"])
     else:
         body = ticket["subject"]
     if s.get("staff"):
@@ -368,6 +375,32 @@ async def tk_delete(i, parts):
         await i.channel.delete(reason=f"Ticket NATIX archivé par {i.user}")
     except discord.HTTPException:
         await i.channel.send("Suppression refusée : vérifie la permission « Gérer les salons ».")
+
+
+async def pay_done(i, parts):
+    store = store_of(i)
+    t = current_ticket(i)
+    if t["state"] != "open":
+        raise Oops("Ce ticket est fermé.")
+    if i.user.id != t["owner"]:
+        raise Oops("Seul le client de ce ticket peut signaler son paiement.")
+    if t["kind"] == "order":
+        order = store.order(i.guild_id, int(t["ref"] or 0))
+        if not order or order["state"] not in ("pending", "accepted"):
+            raise Oops("Cette commande n'attend plus de paiement.")
+    if not store.mark_paid(i.channel_id):
+        raise Oops("Paiement déjà signalé, le staff va vérifier.")
+    store.audit(i.guild_id, i.user.id, "payment:claimed", i.channel_id)
+    await update_ticket_panel(i, t)
+    if not i.response.is_done():
+        await i.response.defer()
+    s = store.settings(i.guild_id)
+    staff = i.guild.get_role(s.get("staff") or 0)
+    who = f"<@&{s['staff']}> " if staff else ""
+    await i.channel.send(f"{E('nx_dollar')} {who}{i.user.mention} indique avoir payé. "
+                         "Vérifiez la réception du paiement avant de valider.",
+                         allowed_mentions=discord.AllowedMentions(users=False, everyone=False,
+                                                                  roles=[staff] if staff else False))
 
 
 # ====================================================================== commandes (orders)
@@ -741,6 +774,17 @@ async def cfg_open(i, parts):
         m = modal("Réseaux officiels", "nx:cfgm:social",
                   *[text_input(f"{label} (https)", key, default=s[key], required=False)
                     for key, label, _ in V.SOCIALS])
+    elif section == "payment":
+        m = modal("Paiements", "nx:cfgm:payment",
+                  text_input("PayPal.me (pseudo ou lien)", "paypal", default=s["paypal"], required=False,
+                             max_length=100, placeholder="natixshop ou https://paypal.me/natixshop"),
+                  text_input("Email PayPal (optionnel)", "paypal_email", default=s["paypal_email"],
+                             required=False, max_length=100),
+                  text_input("Consigne affichée au client", "pay_note", default=s["pay_note"], required=False,
+                             max_length=200),
+                  text_input("Autres moyens (un par ligne, optionnel)", "pay_other", default=s["pay_other"],
+                             paragraph=True, required=False, max_length=500,
+                             placeholder="LTC : ltc1q…\nVirement : sur demande"))
     elif section == "restock":
         m = modal("Annonces de restock", "nx:cfgm:restock",
                   ui.Label(text="Salon des annonces", component=ui.ChannelSelect(
@@ -823,6 +867,21 @@ async def cfg_submit(i, parts):
     elif section == "social":
         store.configure(i.guild_id, **{key: check_url(v.get(key)) for key, _, _ in V.SOCIALS})
         refresh = {"social"}
+    elif section == "payment":
+        paypal = (v.get("paypal") or "").strip()
+        if paypal.startswith("http"):
+            parts_ = urlsplit(paypal)
+            if parts_.scheme != "https" or parts_.netloc.lower() not in ("paypal.me", "www.paypal.me", "www.paypal.com",
+                                                                         "paypal.com"):
+                raise Oops("Le lien doit être un lien https://paypal.me/…")
+            paypal = paypal.rstrip("/")
+        elif paypal and not re.fullmatch(r"@?[A-Za-z0-9]{1,30}", paypal):
+            raise Oops("Pseudo PayPal.me invalide (lettres et chiffres uniquement).")
+        email = (v.get("paypal_email") or "").strip()
+        if email and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+            raise Oops("Email PayPal invalide.")
+        store.configure(i.guild_id, paypal=paypal.lstrip("@"), paypal_email=email,
+                        pay_note=(v.get("pay_note") or "").strip(), pay_other=(v.get("pay_other") or "").strip())
     elif section == "restock":
         ch = first(v, "restock_channel")
         ping = first(v, "restock_ping") or "none"
@@ -873,6 +932,7 @@ ROUTES = [
     (r"^nx:buy:\d+$", buy),
     (r"^nx:buym:\d+$", buy_submit),
     (r"^nx:ord:\w+:\d+$", ord_action),
+    (r"^nx:pay:done$", pay_done),
     (r"^nx:sup:kind$", support_kind),
     (r"^nx:supm:\w+$", support_submit),
     (r"^nx:trade:start$", trade_start),

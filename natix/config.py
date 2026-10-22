@@ -41,6 +41,11 @@ DEFAULT_SETTINGS = {
     "social_instagram": "",
     "social_youtube": "",
     "social_site": "",
+    # Paiements
+    "paypal": "",          # pseudo PayPal.me ou lien https://paypal.me/…
+    "paypal_email": "",
+    "pay_note": "Indique ton pseudo Discord dans la note du paiement.",
+    "pay_other": "",
 }
 
 # key, nom, emoji (nom d'emoji NATIX), description

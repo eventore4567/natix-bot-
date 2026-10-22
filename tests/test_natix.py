@@ -528,6 +528,45 @@ class FlowTests(unittest.TestCase):
         self.assertEqual(self.db.product(GUILD, self.pid)["stock"], 2)  # stock rendu
         self.assertEqual(self.db.orders(GUILD)[0]["state"], "cancelled")
 
+    def test_paypal_payment_flow(self):
+        # Configuration via /setup → Paiements
+        i = self.route(self.admin, "nx:cfg:payment")
+        self.assertEqual(i.response.calls[0][0], "send_modal")
+        i = self.route(self.admin, "nx:cfgm:payment", modal=True, message=SimpleNamespace(id=1),
+                       components=text_fields(paypal="https://evil.com/x", paypal_email="", pay_note="", pay_other=""))
+        self.assertIn("paypal.me", self.last_error(i)[0])
+        self.route(self.admin, "nx:cfgm:payment", modal=True, message=SimpleNamespace(id=1),
+                   components=text_fields(paypal="@natixshop", paypal_email="pay@natix.gg",
+                                          pay_note="Pseudo en note", pay_other="LTC : ltc1qtest"))
+        s = self.db.settings(GUILD)
+        self.assertEqual((s["paypal"], s["paypal_email"]), ("natixshop", "pay@natix.gg"))
+        check_view(self, V.setup_view(self.db, self.guild))
+        # Commande → ticket avec bouton PayPal au bon montant
+        self.route(self.buyer, f"nx:buym:{self.pid}", modal=True, components=text_fields(qty="2"))
+        order = self.db.orders(GUILD)[0]
+        ch = self.guild.channels[order["channel"]]
+        payload = json.dumps(ch.sent[0].kw["view"].to_components())
+        self.assertIn("https://paypal.me/natixshop/19.98EUR", payload)
+        self.assertIn("pay@natix.gg", payload)
+        self.assertIn("ltc1qtest", payload)
+        # Seul le client signale le paiement, une seule fois, et le staff est notifié
+        i = self.route(self.staff, "nx:pay:done", channel=ch)
+        self.assertIn("client", self.last_error(i)[0])
+        panel = SimpleNamespace(id=self.db.ticket(ch.id)["panel_message"])
+        i = self.route(self.buyer, "nx:pay:done", channel=ch, message=panel)
+        self.assertEqual(self.last_error(i), [])
+        self.assertEqual(self.db.ticket(ch.id)["paid"], 1)
+        self.assertIn("indique avoir payé", ch.sent[-1].content)
+        rendered = json.dumps(H.render_ticket(self.db, self.db.ticket(ch.id)).to_components())
+        self.assertIn("Paiement signal", rendered)
+        i = self.route(self.buyer, "nx:pay:done", channel=ch)
+        self.assertIn("déjà signalé", self.last_error(i)[0])
+        # Promo : montant du plan
+        self.route(self.buyer, "nx:promo:standard")
+        t = self.db.many("SELECT * FROM tickets WHERE kind='promo'")[0]
+        payload = json.dumps(self.guild.channels[t["channel"]].sent[0].kw["view"].to_components())
+        self.assertIn("https://paypal.me/natixshop/20.00EUR", payload)
+
     def test_slash_commands(self):
         with patch.object(discord, "TextChannel", REAL_TEXT_CHANNEL):
             bot = Natix(store=self.db)

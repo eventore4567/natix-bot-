@@ -9,7 +9,7 @@ réservées au staff.
 
 | Commande | Rôle |
 | --- | --- |
-| `/setup` | Tableau de bord : salons & rôles, identité, textes, réseaux, catégories, plans promo, restock, rafraîchissement des panneaux |
+| `/setup` | Tableau de bord : salons & rôles, identité, textes, réseaux, paiements PayPal, catégories, plans promo, restock, rafraîchissement des panneaux |
 | `/panel` | Publier un panneau : Accueil, Boutique, Échanges, Promotions, Support, Avis (Are we legit?), Règlement, Réseaux |
 | `/product` | `add` · `edit` · `stock` · `remove` · `list` (avec autocomplétion) |
 | `/giveaway` | `start` · `end` · `reroll` |
@@ -44,6 +44,14 @@ est archivé dans le salon privé avant suppression). Les tickets de commande on
 
 Tous les boutons utilisent des identifiants fixes et l'état est en base : panneaux et tickets
 restent fonctionnels après un redémarrage.
+
+## Paiement PayPal
+
+`/setup` → **Paiements** : pseudo ou lien PayPal.me, email PayPal (optionnel), consigne pour le
+client et autres moyens de paiement. Chaque ticket de commande ou de promotion affiche alors un
+bloc **Paiement** avec le montant exact, un bouton **Payer avec PayPal** (lien PayPal.me avec le
+montant pré-rempli) et un bouton **J'ai payé** : le client le clique une fois, le staff est
+notifié dans le ticket et valide ensuite la commande (Accepter → Livrée).
 
 ## Stock et commandes
 

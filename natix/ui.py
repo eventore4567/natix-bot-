@@ -385,8 +385,44 @@ def order_body(order, settings):
     ]
     if order["notes"]:
         lines.append(f"> Infos : {safe(order['notes'], 300)}")
-    lines.append("-# Le paiement se fait uniquement ici, avec un membre du staff.")
+    lines.append("-# Le paiement se fait uniquement dans ce ticket.")
     return "\n".join(lines)
+
+
+CURRENCY_CODES = {"€": "EUR", "$": "USD", "£": "GBP", "CHF": "CHF", "CAD": "CAD"}
+
+
+def paypal_link(s, cents):
+    """Lien PayPal.me avec le montant pré-rempli (ou None si PayPal n'est pas configuré)."""
+    base = (s.get("paypal") or "").strip()
+    if not base:
+        return None
+    if not base.startswith("https://"):
+        base = "https://paypal.me/" + base.lstrip("@")
+    code = CURRENCY_CODES.get(s.get("currency", "€").strip(), "EUR")
+    return f"{base.rstrip('/')}/{int(cents) / 100:.2f}{code}"
+
+
+def payment_section(s, cents, paid):
+    """Bloc paiement d'un ticket : montant, consignes, bouton PayPal et « J'ai payé »."""
+    if not (s.get("paypal") or s.get("paypal_email") or s.get("pay_other")):
+        return []
+    lines = [f"> Montant : **{money(cents, s['currency'])}**"]
+    if s.get("paypal_email"):
+        lines.append(f"> PayPal : `{safe(s['paypal_email'], 80)}`")
+    if s.get("pay_note"):
+        lines.append(f"> {safe(s['pay_note'], 200)}")
+    lines += [f"> {safe(x, 200)}" for x in (s.get("pay_other") or "").splitlines() if x.strip()]
+    hint = (f"{E('nx_check')} **Paiement signalé** · le staff vérifie et valide ta commande." if paid else
+            "-# Une fois le paiement envoyé, clique sur **J'ai payé**.")
+    buttons = []
+    link = paypal_link(s, cents)
+    if link:
+        buttons.append(ui.Button(label="Payer avec PayPal", url=link, emoji=P("nx_dollar")))
+    buttons.append(btn("Paiement signalé" if paid else "J'ai payé", "nx:pay:done", "nx_check",
+                       discord.ButtonStyle.success, disabled=bool(paid)))
+    return [ui.TextDisplay(f"### {E('nx_dollar')} Paiement\n" + "\n".join(lines) + "\n" + hint),
+            ui.ActionRow(*buttons), ui.Separator()]
 
 
 def order_row(order):
@@ -425,6 +461,9 @@ def setup_view(store, guild):
         f"{E('nx_megaphone')} **Restock** · {ch('restock_channel')} · ping `{s['restock_ping']}`",
         f"{E('nx_star')} **Avis** · {ch('reviews_channel')}",
         f"{E('nx_food')} **Promotions** · {ch('promo_channel')}",
+        f"{E('nx_dollar')} **PayPal** · " + (f"`{safe(s['paypal'], 60)}`" if s.get("paypal") else
+                                            f"`{safe(s['paypal_email'], 60)}`" if s.get("paypal_email")
+                                            else "*non défini*"),
     ])
     ready = s.get("staff") and s.get("category") and s.get("logs")
     hint = ("-# Tout est prêt. Publie les panneaux avec `/panel`." if ready else
@@ -439,7 +478,8 @@ def setup_view(store, guild):
         ui.ActionRow(btn("Salons & rôles", "nx:cfg:channels", "nx_shield", discord.ButtonStyle.primary),
                      btn("Identité", "nx:cfg:identity", "nx_tag"),
                      btn("Textes", "nx:cfg:texts", "nx_book"),
-                     btn("Réseaux", "nx:cfg:social", "nx_link")),
+                     btn("Réseaux", "nx:cfg:social", "nx_link"),
+                     btn("Paiements", "nx:cfg:payment", "nx_dollar", discord.ButtonStyle.primary)),
         ui.ActionRow(btn("Catégories", "nx:cfg:cats", "nx_list"),
                      btn("Promotions", "nx:cfg:plans", "nx_dollar"),
                      btn("Restock", "nx:cfg:restock", "nx_megaphone"),

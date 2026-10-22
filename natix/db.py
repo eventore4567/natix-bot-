@@ -115,6 +115,7 @@ class Store:
             "claimed_by": "INTEGER NOT NULL DEFAULT 0", "number": "INTEGER DEFAULT 0",
             "ref": "TEXT DEFAULT ''", "subject": "TEXT DEFAULT ''", "created": "INTEGER DEFAULT 0",
             "closed_at": "INTEGER DEFAULT 0", "panel_message": "INTEGER DEFAULT 0",
+            "paid": "INTEGER DEFAULT 0",
         })
         self._add_columns("promo_plans", {
             "price_cents": "INTEGER", "duration": "TEXT DEFAULT ''", "pings": "TEXT DEFAULT ''",
@@ -317,6 +318,11 @@ class Store:
         items = {k: v for k, v in fields.items() if k in allowed}
         sql = ", ".join(f"{k}=?" for k in items)
         self.execute(f"UPDATE tickets SET {sql} WHERE channel=?", (*items.values(), channel))
+
+    def mark_paid(self, channel):
+        """Le client signale son paiement (une seule fois)."""
+        return self.execute("UPDATE tickets SET paid=1 WHERE channel=? AND state='open' AND paid=0",
+                            (channel,)).rowcount > 0
 
     def claim_ticket(self, channel, staff):
         return self.execute("""UPDATE tickets SET claimed_by=? WHERE channel=? AND state='open'
