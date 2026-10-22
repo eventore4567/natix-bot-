@@ -388,9 +388,10 @@ class PanelTests(unittest.TestCase):
         self.assertIn("natix_logo.png", serialized)
         self.assertIn("@natixshop", serialized)
         self.assertIn("natixshop9@gmail.com", serialized)
-        self.assertIn("nx:ppl:copy", serialized)
-        self.assertIn("Copier l'e-mail", serialized)
-        self.assertIs(H.find_route("nx:ppl:copy"), H.ppl_copy)
+        self.assertNotIn("nx:ppl:copy", serialized)
+        self.assertNotIn("Copier l'e-mail", serialized)
+        self.assertIn("```text\\n" + configured["paypal_email"] + "\\n```", serialized)
+        self.assertIsNone(H.find_route("nx:ppl:copy"))
         self.assertNotIn("Comment payer", serialized)
         self.assertNotIn("J'ai payé", serialized)
         self.assertEqual({f.filename for f in assets}, {"natix_shop.png", "natix_logo.png"})
@@ -467,18 +468,15 @@ class FlowTests(unittest.TestCase):
         texts += [c.kwargs.get("content") for c in i.followup.send.call_args_list]
         return [t for t in texts if t]
 
-    def test_pplme_copy_email_response(self):
-        self.db.configure(GUILD, paypal_email="natixshop9@gmail.com")
-        i = self.route(self.buyer, "nx:ppl:copy")
-        self.assertEqual(i.response.calls[0][0], "send_message")
-        response = i.response.calls[0][2]
-        self.assertTrue(response["ephemeral"])
-        self.assertIn("natixshop9@gmail.com", response["content"])
-        self.assertIn("```text", response["content"])
-        self.assertFalse(response["allowed_mentions"].everyone)
-        self.db.configure(GUILD, paypal_email="")
-        invalid = self.route(self.buyer, "nx:ppl:copy")
-        self.assertIn("pas configuré", self.last_error(invalid)[0])
+    def test_pplme_native_copy_without_popup(self):
+        self.db.configure(GUILD, paypal="@NatixShop", paypal_email="natixshop9@gmail.com")
+        panel, files = V.pplme_panel(self.db, GUILD,
+                                   "**Mon user PayPal :** @NatixShop\n**Mon mail PayPal :** natixshop9@gmail.com")
+        data = json.dumps(check_view(self,panel),ensure_ascii=False)
+        self.assertIn("```text\\nnatixshop9@gmail.com\\n```", data)
+        self.assertNotIn("nx:ppl:copy",data)
+        self.assertIsNone(H.find_route("nx:ppl:copy"))
+        self.assertEqual({f.filename for f in files}, {"natix_shop.png", "natix_logo.png"})
 
     def test_full_order_flow(self):
         i = self.route(self.buyer, "nx:shop:cat", values=["nitro"], message=SimpleNamespace(id=1))
