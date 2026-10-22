@@ -363,7 +363,7 @@ class PanelTests(unittest.TestCase):
         full_data=json.dumps(check_view(self,full),ensure_ascii=False)
         self.assertIn("https://paypal.me/NatixShop",full_data)
 
-    def test_pplme_has_natix_banner_and_short_contact_details(self):    def test_pplme_has_natix_banner_and_short_contact_details(self):
+    def test_pplme_has_natix_banner_and_short_contact_details(self):
         from natix.config import PANEL_KINDS
         from natix.commands import paypal_contact_message
         self.assertEqual(PANEL_KINDS["paypal"], "PayPal / Paiement")
