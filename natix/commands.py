@@ -11,7 +11,7 @@ from discord import app_commands,ui
 
 from .assets import CATEGORIES,PANELS,PLANS,TICKET_TYPES,safe,banner,emoji
 from .panels import Panel,GiveawayPanel,CustomPanel,CatalogView
-from .services import create_ticket,export_transcript,is_staff,respond,audit
+from .services import create_ticket,export_transcript,archive_ticket,is_staff,respond,audit
 
 LOG=logging.getLogger("natix.commands")
 CATEGORIES_CHOICES=[app_commands.Choice(name=name,value=key) for key,name,_ in CATEGORIES]
@@ -333,6 +333,16 @@ def register(tree):
         from .services import ticket_action
         await ticket_action(i,"reopen")
 
+    @tickets.command(name="claim",description="Prendre officiellement en charge un ticket ouvert")
+    async def t_claim(i:discord.Interaction):
+        from .services import ticket_action
+        await ticket_action(i,"claim")
+
+    @tickets.command(name="unclaim",description="Libérer le ticket attribué")
+    async def t_unclaim(i:discord.Interaction):
+        from .services import ticket_action
+        await ticket_action(i,"unclaim")
+
     @tickets.command(name="transcript",description="Exporter tout l'historique du ticket")
     async def t_transcript(i:discord.Interaction):await export_transcript(i)
 
@@ -344,9 +354,20 @@ def register(tree):
         if not row:return await respond(i,"Ceci n'est pas un ticket NATIX.")
         if row["state"]!="closed":
             return await respond(i,"Ferme le ticket avant suppression.")
-        await i.response.send_message("Suppression du ticket…",ephemeral=True)
+        await i.response.defer(ephemeral=True,thinking=True)
+        try:
+            archived,detail=await archive_ticket(i)
+        except Exception:
+            LOG.exception("Ticket archive failed before deletion")
+            return await i.followup.send("Archivage impossible : le ticket est conservé.",ephemeral=True)
+        if not archived:
+            return await i.followup.send(detail,ephemeral=True)
+        try:
+            await i.channel.delete(reason="NATIX ticket archived and deleted by "+str(i.user.id))
+        except discord.HTTPException:
+            return await i.followup.send("Archive envoyée mais suppression du salon refusée par Discord.",ephemeral=True)
         db.state_ticket(i.channel_id,"deleted")
-        await i.channel.delete(reason="NATIX ticket deleted by "+str(i.user.id))
+        await i.followup.send("✅ Ticket supprimé après archivage : "+detail,ephemeral=True)
 
     tree.add_command(tickets)
 
