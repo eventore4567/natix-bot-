@@ -324,6 +324,23 @@ def social_panel(store, guild_id):
     return v, files_for("social", s)
 
 
+def pplme_panel(store, guild_id, contact):
+    """Compact NATIX PayPal contact panel with the same banner as the shop.
+
+    Different from the full /panel PayPal guide: only username and email.
+    No payment confirmation or price is generated outside an order ticket.
+    """
+    settings = store.settings(guild_id)
+    name = safe(settings["name"], 40)
+    view = view_of(container(
+        *header("shop", settings, f"## {E('nx_dollar')} PayPal · {name}",
+                "Nos coordonnées PayPal officielles."),
+        ui.Separator(),
+        ui.TextDisplay("### Informations PayPal\n" + contact),
+    ))
+    return view, files_for("shop", settings)
+
+
 def paypal_panel(store, guild_id):
     """Public payment-information panel.
 
