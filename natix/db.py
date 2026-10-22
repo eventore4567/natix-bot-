@@ -207,7 +207,7 @@ class Store:
 
     def promo_plans(self,guild):
         from .assets import PLANS
-        rows=self.many("SELECT * FROM promo_plans WHERE guild=? AND active=1 ORDER BY plan_key",(guild,))
+        rows=self.many("SELECT * FROM promo_plans WHERE guild=? AND active=1 ORDER BY plan_key LIMIT 8",(guild,))
         if not rows:
             return [(k,title,detail) for k,title,detail in PLANS]
         return [(r["plan_key"],r["title"],r["price"]+" · "+r["description"]) for r in rows]
