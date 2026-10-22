@@ -1,227 +1,302 @@
-"""NATIX SHOP: small command surface faithful to the server hub reference.
+"""Les 5 commandes slash de NATIX. Tout le reste passe par les panneaux.
 
-Seven independent public panels, /setup and a single staff /manage group.
-No emoji creation command, no duplicates, no extra unused slash commands.
+/setup     tableau de bord de configuration (boutons + formulaires)
+/panel     publier un panneau (accueil, boutique, échanges, promos, support, avis, règlement, réseaux)
+/product   ajouter, modifier, réapprovisionner, retirer, lister les produits
+/giveaway  lancer, terminer, relancer un tirage
+/orders    suivre les commandes clients
 """
-import io
 import logging
-from urllib.parse import urlsplit
+import time
 
 import discord
 from discord import app_commands
 
-from .assets import CATEGORIES, banner, safe
-from .panels import Panel, GiveawayPanel
-from .services import archive_ticket, is_staff, respond, audit
+from . import ui as V
+from .config import ORDER_STATES, PANEL_KINDS
+from .db import parse_price
+from .emojis import EMOJIS
+from .handlers import finish_giveaway
+from .util import NO_PINGS, is_staff, money, parse_duration, reply, safe, stock_text
 
-LOG=logging.getLogger("natix.commands")
-CATEGORY_CHOICES=[app_commands.Choice(name=name,value=key) for key,name,_ in CATEGORIES]
-ORDER_STATES=[app_commands.Choice(name=k,value=k)
-              for k in ("accepted","processing","delivered","cancelled")]
+LOG = logging.getLogger("natix.commands")
+E = EMOJIS.text
+ADMIN = discord.Permissions(manage_guild=True)
 
-async def post_panel(i,kind):
-    if not i.guild:
-        return await respond(i,"Cette commande fonctionne uniquement sur ton serveur.")
-    conf=i.client.store.settings(i.guild_id)
-    view=Panel(kind,i.client.store,i.guild)
-    attachment=(discord.File(banner(),filename="natix_banner.png")
-                if kind not in ("reviews",) and not conf["banner"] else None)
-    await i.response.send_message(view=view,file=attachment,
-                                  allowed_mentions=discord.AllowedMentions.none())
 
-def register(tree):
-    # Only the panel names from the supplied NATIX reference are slash commands.
-    @tree.command(name="home",description="NATIX • Accueil et accès à tous les services")
+def staff_only():
+    async def predicate(i: discord.Interaction):
+        if not is_staff(i.user, i.client.store.settings(i.guild_id)):
+            raise app_commands.CheckFailure("staff")
+        return True
+    return app_commands.check(predicate)
+
+
+# ------------------------------------------------------------------ autocomplétions
+async def ac_category(i, current):
+    cur = current.lower()
+    return [app_commands.Choice(name=c["name"][:100], value=c["key"])
+            for c in i.client.store.categories(i.guild_id, include_inactive=True)
+            if cur in c["name"].lower() or cur in c["key"]][:25]
+
+
+async def ac_product(i, current):
+    cur = current.lower()
+    s = i.client.store.settings(i.guild_id)
+    out = []
+    for p in i.client.store.products(i.guild_id, limit=200):
+        label = f"#{p['id']} · {p['name']} · {money(p['price_cents'], s['currency'])} · {stock_text(p['stock'])}"
+        if cur in label.lower():
+            out.append(app_commands.Choice(name=label[:100], value=p["id"]))
+    return out[:25]
+
+
+async def ac_giveaway(i, current):
+    out = []
+    for g in i.client.store.recent_giveaways(i.guild_id):
+        state = "terminé" if g["closed"] else "en cours"
+        label = f"{g['prize']} · {state}"
+        if current.lower() in label.lower():
+            out.append(app_commands.Choice(name=label[:100], value=str(g["message"])))
+    return out[:25]
+
+
+async def announce_restock(i, product, added):
+    store = i.client.store
+    s = store.settings(i.guild_id)
+    channel = i.guild.get_channel(s.get("restock_channel") or 0)
+    if not isinstance(channel, discord.TextChannel):
+        return
+    cat = store.category(i.guild_id, product["category"])
+    shop = store.panels(i.guild_id, "shop")
+    link = (f"\n[Voir la catégorie](https://discord.com/channels/{i.guild_id}/{shop[0]['channel']}/{shop[0]['message']})"
+            if shop else "")
+    ping = {"here": "@here ", "everyone": "@everyone "}.get(s["restock_ping"], "")
+    emoji = E(product["emoji"] or (cat["emoji"] if cat else "nx_box"))
+    text = (f"{ping}**Restock !**\n\n{emoji} **{safe(cat['name'] if cat else 'Boutique', 60)} · "
+            f"{safe(product['name'], 80)}**\n+{added} ajouté{link}")
+    try:
+        await channel.send(text, allowed_mentions=discord.AllowedMentions(everyone=bool(ping), users=False,
+                                                                           roles=False))
+    except discord.HTTPException:
+        LOG.warning("Annonce de restock impossible dans %s", channel.id)
+
+
+def register(tree: app_commands.CommandTree):
+    # -------------------------------------------------------------- /setup
+    @tree.command(name="setup", description="Configurer NATIX (salons, staff, textes, catégories, promotions)")
+    @app_commands.guild_only()
+    @app_commands.default_permissions(manage_guild=True)
     @app_commands.checks.has_permissions(manage_guild=True)
-    async def cmd_home(i:discord.Interaction):
-        await post_panel(i,"home")
+    async def setup(i: discord.Interaction):
+        await i.response.send_message(view=V.setup_view(i.client.store, i.guild), ephemeral=True,
+                                      allowed_mentions=NO_PINGS)
 
-    @tree.command(name="shop",description="NATIX • Boutique et produits")
+    # -------------------------------------------------------------- /panel
+    @tree.command(name="panel", description="Publier un panneau NATIX dans un salon")
+    @app_commands.guild_only()
+    @app_commands.default_permissions(manage_guild=True)
     @app_commands.checks.has_permissions(manage_guild=True)
-    async def cmd_shop(i:discord.Interaction):
-        await post_panel(i,"shop")
+    @app_commands.describe(type="Panneau à publier", salon="Salon de destination (par défaut : ici)")
+    @app_commands.choices(type=[app_commands.Choice(name=v, value=k) for k, v in PANEL_KINDS.items()])
+    async def panel(i: discord.Interaction, type: app_commands.Choice[str], salon: discord.TextChannel = None):
+        channel = salon or i.channel
+        perms = channel.permissions_for(i.guild.me)
+        if not (perms.send_messages and perms.attach_files and perms.view_channel):
+            return await reply(i, f"NATIX ne peut pas envoyer de message avec image dans {channel.mention}.")
+        view, files = V.PANEL_BUILDERS[type.value](i.client.store, i.guild_id)
+        msg = await channel.send(view=view, files=files, allowed_mentions=NO_PINGS)
+        i.client.store.register_panel(msg.id, i.guild_id, channel.id, type.value)
+        i.client.store.audit(i.guild_id, i.user.id, "panel:" + type.value, msg.id)
+        await reply(i, None, view=V.notice(f"Panneau **{type.name}** publié dans {channel.mention}."))
 
-    @tree.command(name="support",description="NATIX • Panneau de tickets et assistance")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def cmd_support(i:discord.Interaction):
-        await post_panel(i,"support")
+    # -------------------------------------------------------------- /product
+    product = app_commands.Group(name="product", description="Gérer les produits de la boutique",
+                                 guild_only=True, default_permissions=ADMIN)
 
-    @tree.command(name="giveaway",description="NATIX • Panneau des giveaways actifs")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def cmd_giveaway(i:discord.Interaction):
-        await post_panel(i,"giveaways")
+    @product.command(name="add", description="Ajouter un produit")
+    @staff_only()
+    @app_commands.describe(categorie="Catégorie", nom="Nom affiché", prix="Prix (ex. 10 ou 6.5)",
+                           stock="Quantité disponible (-1 = illimité)", description="Courte description",
+                           emoji="Emoji optionnel (Unicode ou <:nom:id>)")
+    @app_commands.autocomplete(categorie=ac_category)
+    async def p_add(i: discord.Interaction, categorie: str, nom: app_commands.Range[str, 1, 80],
+                    prix: str, stock: app_commands.Range[int, -1, 100000] = -1,
+                    description: app_commands.Range[str, 0, 300] = "", emoji: str = ""):
+        store = i.client.store
+        if not store.category(i.guild_id, categorie):
+            return await reply(i, "Catégorie introuvable. Choisis-la dans la liste.")
+        cents = parse_price(prix)
+        if cents is None:
+            return await reply(i, "Prix invalide (ex. 10 ou 6.5).")
+        pid = store.add_product(i.guild_id, categorie, nom, description, cents, stock, emoji.strip())
+        store.audit(i.guild_id, i.user.id, "product:add", pid)
+        s = store.settings(i.guild_id)
+        await reply(i, None, view=V.notice(f"Produit **#{pid} · {safe(nom, 80)}** ajouté · "
+                                           f"{money(cents, s['currency'])} · {stock_text(stock)}"))
 
-    @tree.command(name="stats",description="NATIX • Statistiques de la boutique")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def cmd_stats(i:discord.Interaction):
-        await post_panel(i,"stats")
+    @product.command(name="edit", description="Modifier un produit")
+    @staff_only()
+    @app_commands.autocomplete(produit=ac_product, categorie=ac_category)
+    @app_commands.describe(produit="Produit à modifier", prix="Nouveau prix (ex. 10 ou 6.5)")
+    async def p_edit(i: discord.Interaction, produit: int, nom: app_commands.Range[str, 1, 80] = None,
+                     prix: str = None, description: app_commands.Range[str, 0, 300] = None,
+                     categorie: str = None, emoji: str = None):
+        store = i.client.store
+        cents = None
+        if prix is not None:
+            cents = parse_price(prix)
+            if cents is None:
+                return await reply(i, "Prix invalide (ex. 10 ou 6.5).")
+        if categorie is not None and not store.category(i.guild_id, categorie):
+            return await reply(i, "Catégorie introuvable.")
+        changed = store.update_product(i.guild_id, produit, name=nom, price_cents=cents, details=description,
+                                       category=categorie, emoji=emoji.strip() if emoji is not None else None)
+        if not changed:
+            return await reply(i, "Produit introuvable ou aucun champ modifié.")
+        store.audit(i.guild_id, i.user.id, "product:edit", produit)
+        await reply(i, None, view=V.notice(f"Produit **#{produit}** mis à jour."))
 
-    @tree.command(name="social",description="NATIX • Liens officiels et réseaux")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def cmd_social(i:discord.Interaction):
-        await post_panel(i,"social")
+    @product.command(name="stock", description="Réapprovisionner ou corriger le stock")
+    @staff_only()
+    @app_commands.autocomplete(produit=ac_product)
+    @app_commands.describe(produit="Produit", quantite="Quantité", mode="Ajouter au stock ou le remplacer")
+    @app_commands.choices(mode=[app_commands.Choice(name="Ajouter (restock)", value="add"),
+                                app_commands.Choice(name="Définir la valeur exacte", value="set"),
+                                app_commands.Choice(name="Rendre illimité", value="unlimited")])
+    async def p_stock(i: discord.Interaction, produit: int, quantite: app_commands.Range[int, 0, 100000] = 0,
+                      mode: app_commands.Choice[str] = None):
+        store = i.client.store
+        p = store.product(i.guild_id, produit)
+        if not p:
+            return await reply(i, "Produit introuvable.")
+        how = mode.value if mode else "add"
+        before = p["stock"]
+        if how == "unlimited":
+            store.update_product(i.guild_id, produit, stock=-1)
+            new = -1
+        elif how == "set" or before == -1:
+            store.update_product(i.guild_id, produit, stock=quantite)
+            new = quantite
+        else:
+            if quantite == 0:
+                return await reply(i, "Indique une quantité à ajouter.")
+            new = store.add_stock(i.guild_id, produit, quantite)
+        store.audit(i.guild_id, i.user.id, "product:stock", f"{produit} {before}->{new}")
+        await reply(i, None, view=V.notice(f"**{safe(p['name'], 80)}** · {stock_text(before)} → {stock_text(new)}",
+                                           "nx_box"))
+        added = (new - max(before, 0)) if new != -1 and before != -1 else 0
+        if added > 0:
+            await announce_restock(i, p, added)
 
-    @tree.command(name="rules",description="NATIX • Règlement de la boutique")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def cmd_rules(i:discord.Interaction):
-        await post_panel(i,"terms")
+    @product.command(name="remove", description="Retirer un produit de la boutique")
+    @staff_only()
+    @app_commands.autocomplete(produit=ac_product)
+    async def p_remove(i: discord.Interaction, produit: int):
+        store = i.client.store
+        p = store.product(i.guild_id, produit)
+        if not p or not store.update_product(i.guild_id, produit, active=0):
+            return await reply(i, "Produit introuvable.")
+        store.audit(i.guild_id, i.user.id, "product:remove", produit)
+        await reply(i, None, view=V.notice(f"**{safe(p['name'], 80)}** retiré de la boutique.", "nx_trash"))
 
-    @tree.command(name="setup",description="NATIX • Configurer tickets, staff et archives")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def cmd_setup(i:discord.Interaction,staff_role:discord.Role,
-                        tickets:discord.CategoryChannel,logs:discord.TextChannel):
-        if logs.category_id==tickets.id:
-            return await respond(i,"Le salon des archives doit rester privé et séparé des tickets.")
-        everyone=i.guild.default_role
-        perms=logs.overwrites_for(everyone)
-        if perms.view_channel is not False and logs.permissions_for(everyone).view_channel:
-            return await respond(i,"Le salon de logs doit être caché aux membres (@everyone).")
-        i.client.store.configure(i.guild_id,staff=staff_role.id,
-                                 category=tickets.id,logs=logs.id)
-        await respond(i,"✅ NATIX configuré : staff "+staff_role.mention+
-             ", tickets **"+safe(tickets.name,70)+"**, archives "+logs.mention+".")
-        await audit(i,"setup:updated",str(staff_role.id))
+    @product.command(name="list", description="Voir le catalogue (prix, stock, identifiants)")
+    @staff_only()
+    @app_commands.autocomplete(categorie=ac_category)
+    async def p_list(i: discord.Interaction, categorie: str = None):
+        store = i.client.store
+        s = store.settings(i.guild_id)
+        blocks = []
+        for c in store.categories(i.guild_id, include_inactive=True):
+            if categorie and c["key"] != categorie:
+                continue
+            rows = store.products(i.guild_id, c["key"], limit=25)
+            lines = "\n".join(f"`#{p['id']}` {safe(p['name'], 50)} · **{money(p['price_cents'], s['currency'])}**"
+                              f" · {stock_text(p['stock'])}" for p in rows) or "-# Aucun produit"
+            blocks.append(f"### {E(c['emoji'])} {safe(c['name'], 50)}\n{lines}")
+        text = "\n".join(blocks)[:3900] or "Aucune catégorie."
+        await reply(i, None, view=V.view_of(V.container(V.ui.TextDisplay(f"## {E('nx_list')} Catalogue\n{text}"))))
 
-    manage=app_commands.Group(name="manage",description="NATIX • Un seul menu staff pour gérer la boutique")
+    tree.add_command(product)
 
-    @manage.command(name="add",description="Ajouter un produit")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    @app_commands.choices(category=CATEGORY_CHOICES)
-    async def add(i:discord.Interaction,category:app_commands.Choice[str],
-                  name:str,price:str,description:str,stock:int=-1):
-        if stock < -1:
-            return await respond(i,"Stock : -1 (illimité) ou un nombre positif.")
-        pid=i.client.store.add_product(i.guild_id,category.value,
-            name[:80],description[:400],price[:50],stock)
-        await respond(i,"Produit **#"+str(pid)+"** créé. Il apparaît dans /shop.")
-        await audit(i,"product:add",str(pid))
+    # -------------------------------------------------------------- /giveaway
+    giveaway = app_commands.Group(name="giveaway", description="Gérer les giveaways",
+                                  guild_only=True, default_permissions=ADMIN)
 
-    @manage.command(name="edit",description="Modifier un produit existant")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def edit(i:discord.Interaction,id:int,name:str=None,
-                   price:str=None,description:str=None):
-        updates={}
-        if name is not None:updates["name"]=name[:80]
-        if price is not None:updates["price"]=price[:50]
-        if description is not None:updates["details"]=description[:400]
-        if not updates:
-            return await respond(i,"Indique au moins un champ à modifier.")
-        changed=i.client.store.modify_product(i.guild_id,id,**updates)
-        await respond(i,"Produit mis à jour." if changed else "Produit introuvable.")
-        if changed:await audit(i,"product:edit",str(id))
+    @giveaway.command(name="start", description="Lancer un giveaway")
+    @staff_only()
+    @app_commands.describe(lot="Ce qui est à gagner (ex. 5€)", duree="Durée : 30m, 2h, 1d…",
+                           gagnants="Nombre de gagnants", salon="Salon (par défaut : ici)")
+    async def g_start(i: discord.Interaction, lot: app_commands.Range[str, 1, 100], duree: str,
+                      gagnants: app_commands.Range[int, 1, 20] = 1, salon: discord.TextChannel = None):
+        seconds = parse_duration(duree)
+        if not seconds or not 60 <= seconds <= 60 * 86400:
+            return await reply(i, "Durée invalide : entre 1 minute et 60 jours (ex. 30m, 2h, 1d).")
+        channel = salon or i.channel
+        ends = int(time.time()) + seconds
+        preview = {"prize": lot, "winners": gagnants, "ends": ends, "winner_ids": ""}
+        msg = await channel.send(view=V.giveaway_view(preview, 0), allowed_mentions=NO_PINGS)
+        i.client.store.create_giveaway(msg.id, i.guild_id, channel.id, lot, ends, gagnants, i.user.id)
+        i.client.store.audit(i.guild_id, i.user.id, "giveaway:start", msg.id)
+        await reply(i, None, view=V.notice(f"Giveaway lancé dans {channel.mention}, fin <t:{ends}:R>.", "nx_gift"))
 
-    @manage.command(name="remove",description="Retirer un produit de la boutique")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def remove(i:discord.Interaction,id:int):
-        changed=i.client.store.modify_product(i.guild_id,id,active=0)
-        await respond(i,"Produit désactivé." if changed else "Produit introuvable.")
-        if changed:await audit(i,"product:remove",str(id))
+    @giveaway.command(name="end", description="Terminer un giveaway maintenant")
+    @staff_only()
+    @app_commands.autocomplete(giveaway=ac_giveaway)
+    async def g_end(i: discord.Interaction, giveaway: str):
+        if not giveaway.isdigit():
+            return await reply(i, "Giveaway introuvable.")
+        await i.response.defer(ephemeral=True)
+        await i.followup.send(await finish_giveaway(i.client, int(giveaway)), ephemeral=True)
 
-    @manage.command(name="stock",description="Modifier le stock d'un produit")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def stock(i:discord.Interaction,id:int,quantity:int):
-        if quantity < -1:
-            return await respond(i,"Stock : -1 (illimité) ou un nombre positif.")
-        changed=i.client.store.modify_product(i.guild_id,id,stock=quantity)
-        await respond(i,"Stock actualisé : "+str(quantity) if changed else "Produit introuvable.")
-        if changed:await audit(i,"product:stock",str(id)+"="+str(quantity))
+    @giveaway.command(name="reroll", description="Tirer de nouveaux gagnants")
+    @staff_only()
+    @app_commands.autocomplete(giveaway=ac_giveaway)
+    async def g_reroll(i: discord.Interaction, giveaway: str):
+        if not giveaway.isdigit():
+            return await reply(i, "Giveaway introuvable.")
+        await i.response.defer(ephemeral=True)
+        await i.followup.send(await finish_giveaway(i.client, int(giveaway), reroll=True), ephemeral=True)
 
-    @manage.command(name="products",description="Voir les identifiants, prix et stocks")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def products(i:discord.Interaction):
-        rows=i.client.store.products(i.guild_id,limit=30)
-        if not rows:return await respond(i,"Boutique vide. Ajoute un produit avec /manage add.")
-        lines=["**NATIX • Catalogue staff**"]
-        for item in rows:
-            lines.append("#"+str(item["id"])+" — "+safe(item["name"],35)
-                         +" · "+safe(item["price"],25)+" · stock "+str(item["stock"]))
-        await respond(i,"\n".join(lines)[:1900])
+    tree.add_command(giveaway)
 
-    @manage.command(name="orders",description="Afficher les commandes en attente")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def orders(i:discord.Interaction):
-        rows=i.client.store.orders(i.guild_id,limit=25)
-        if not rows:return await respond(i,"Aucune commande.")
-        await respond(i,"\n".join(
-            "#"+str(o["id"])+" — "+safe(o["product_name"],45)
-            +" — "+o["state"] for o in rows)[:1900])
+    # -------------------------------------------------------------- /orders
+    @tree.command(name="orders", description="Suivre les commandes clients")
+    @app_commands.guild_only()
+    @app_commands.default_permissions(manage_guild=True)
+    @staff_only()
+    @app_commands.describe(membre="Filtrer par client", statut="Filtrer par statut")
+    @app_commands.choices(statut=[app_commands.Choice(name=v, value=k) for k, v in ORDER_STATES.items()])
+    async def orders(i: discord.Interaction, membre: discord.Member = None,
+                     statut: app_commands.Choice[str] = None):
+        store = i.client.store
+        s = store.settings(i.guild_id)
+        rows = store.orders(i.guild_id, buyer=membre.id if membre else None,
+                            state=statut.value if statut else None, limit=15)
+        if not rows:
+            return await reply(i, "Aucune commande trouvée.")
+        lines = []
+        for o in rows:
+            where = f" · <#{o['channel']}>" if o["channel"] else ""
+            lines.append(f"`#{o['id']}` **{safe(o['product_name'], 50)}** ×{o['quantity']} · "
+                         f"{money(o['total_cents'], s['currency'])} · {ORDER_STATES.get(o['state'], o['state'])}\n"
+                         f"-# <@{o['buyer']}> · <t:{o['created']}:R>{where}")
+        m = store.metrics(i.guild_id)
+        await reply(i, None, view=V.view_of(V.container(V.ui.TextDisplay(
+            f"## {E('nx_cart')} Commandes\n-# {m['orders']} au total · {m['pending']} en cours · "
+            f"{m['delivered']} livrées\n" + "\n".join(lines)))))
 
-    @manage.command(name="order",description="Accepter, préparer ou livrer une commande")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    @app_commands.choices(state=ORDER_STATES)
-    async def order(i:discord.Interaction,id:int,state:app_commands.Choice[str]):
-        ok,message=i.client.store.transition_order(i.guild_id,id,state.value,i.user.id)
-        await respond(i,("✅ " if ok else "⚠️ ")+message)
-        if ok:await audit(i,"order:state",str(id)+"="+state.value)
-
-    @manage.command(name="giveaway",description="Créer un giveaway avec un vrai tirage")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def make_giveaway(i:discord.Interaction,prize:str,
-                            minutes:app_commands.Range[int,1,10080]):
-        if not i.guild:
-            return await respond(i,"Disponible sur un serveur.")
-        await i.response.send_message(view=GiveawayPanel(prize))
-        message=await i.original_response()
-        import time
-        i.client.store.execute(
-            "INSERT INTO giveaways(message,channel,prize,ends,closed) VALUES (?,?,?,?,0)",
-            (message.id,i.channel_id,prize[:120],int(time.time())+minutes*60)
-        )
-        await audit(i,"giveaway:new",str(message.id))
-
-    @manage.command(name="social",description="Définir les liens officiels du serveur")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def social(i:discord.Interaction,discord_url:str=None,
-                     tiktok_url:str=None,website_url:str=None):
-        values={}
-        for key,value in (
-            ("social_discord",discord_url),("social_tiktok",tiktok_url),
-            ("social_site",website_url)
-        ):
-            if value is None:continue
-            url=value.strip()
-            if url and (len(url)>220 or urlsplit(url).scheme!="https" or
-                        not urlsplit(url).netloc):
-                return await respond(i,"Utilise des liens HTTPS valides.")
-            values[key]=url
-        if not values:return await respond(i,"Indique au moins un lien.")
-        i.client.store.configure(i.guild_id,**values)
-        await respond(i,"Liens officiels enregistrés. Republie /social.")
-        await audit(i,"social:update",",".join(values))
-
-    @manage.command(name="rules",description="Modifier le règlement de la boutique")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def rules(i:discord.Interaction,text:str):
-        i.client.store.configure(i.guild_id,rules=text[:2900])
-        await respond(i,"Règlement enregistré. Republie /rules.")
-        await audit(i,"rules:update","")
-
-    @manage.command(name="delete_ticket",description="Archiver puis supprimer un ticket fermé")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def delete_ticket(i:discord.Interaction):
-        row=i.client.store.ticket(i.channel_id)
-        if not row or row["state"]!="closed":
-            return await respond(i,"Ferme ce ticket NATIX avant de le supprimer.")
-        await i.response.defer(ephemeral=True,thinking=True)
-        archived,detail=await archive_ticket(i)
-        if not archived:
-            return await i.followup.send(detail,ephemeral=True)
-        try:
-            await i.channel.delete(reason="NATIX transcript archived; ticket deleted by staff")
-        except discord.HTTPException:
-            return await i.followup.send("Archive enregistrée, mais suppression refusée.",ephemeral=True)
-        i.client.store.state_ticket(i.channel_id,"deleted")
-        await i.followup.send("Ticket archivé et supprimé.",ephemeral=True)
-
-    tree.add_command(manage)
-
+    # -------------------------------------------------------------- erreurs
     @tree.error
-    async def error(i,exc):
-        LOG.warning("NATIX command error: %s",exc)
+    async def on_error(i: discord.Interaction, error: app_commands.AppCommandError):
+        if isinstance(error, (app_commands.MissingPermissions, app_commands.CheckFailure)):
+            text = "Commande réservée au staff."
+        elif isinstance(error, app_commands.NoPrivateMessage):
+            text = "Commande disponible uniquement sur un serveur."
+        else:
+            LOG.exception("Erreur de commande", exc_info=error)
+            text = "La commande a échoué. Vérifie la configuration avec /setup."
         try:
-            if isinstance(exc,app_commands.MissingPermissions):
-                await respond(i,"Commande réservée aux responsables du serveur.")
-            else:
-                await respond(i,"La commande n'a pas pu être exécutée. Vérifie la configuration.")
+            await reply(i, f"{E('nx_cross')} {text}")
         except discord.HTTPException:
-            LOG.exception("Could not send command error")
+            pass

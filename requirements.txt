@@ -1,2 +1,1 @@
-discord.py>=2.6.3,<3
-Pillow>=11,<13
+discord.py>=2.7.1,<3

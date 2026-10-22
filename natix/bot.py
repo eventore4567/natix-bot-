@@ -1,129 +1,97 @@
-"""Discord client, persistent view registration and scheduled giveaway settlements."""
+"""Client Discord NATIX : synchronisation propre des commandes, routeur, giveaways."""
 import logging
 import os
-import secrets
-import time
-from types import SimpleNamespace
 
 import discord
 from discord import app_commands
 from discord.ext import tasks
 
-from .assets import PANELS, safe
 from .commands import register
 from .db import Store
-from .panels import Panel, TicketControls, GiveawayPanel, CustomPanel, CatalogView
+from .emojis import EMOJIS
+from .handlers import finish_giveaway, route
+from .util import NO_PINGS
 
-LOG=logging.getLogger("natix.bot")
+LOG = logging.getLogger("natix.bot")
+
 
 class Natix(discord.Client):
-    def __init__(self,store=None):
-        intents=discord.Intents.default()
-        # Enable only after they are allowed in Discord Developer Portal.
-        intents.members=os.getenv("NATIX_MEMBERS_INTENT","0")=="1"
-        intents.presences=os.getenv("NATIX_PRESENCES_INTENT","0")=="1"
-        super().__init__(intents=intents,allowed_mentions=discord.AllowedMentions.none())
-        self.store=store or Store()
-        self.tree=app_commands.CommandTree(self)
+    def __init__(self, store=None):
+        intents = discord.Intents.default()
+        intents.members = os.getenv("NATIX_MEMBERS_INTENT", "0") == "1"
+        super().__init__(intents=intents, allowed_mentions=NO_PINGS)
+        self.store = store or Store()
+        self.tree = app_commands.CommandTree(self)
         register(self.tree)
+        self._cleaned = False
 
     async def setup_hook(self):
-        # Register dispatch mappings for persistent components BEFORE Discord events.
-        for key in PANELS:
-            self.add_view(Panel(key,self.store))
-        self.add_view(TicketControls())
-        self.add_view(GiveawayPanel())
-        for record in self.store.custom_panels():
-            if self.store.custom_items(record['id']):
-                self.add_view(CustomPanel(self.store,record))
-        # Register current catalog product IDs and customized promo buttons at startup.
-        # These must remain clickable after a Railway restart.
-        for row in self.store.many("SELECT DISTINCT guild, category FROM products WHERE active=1"):
-            products=self.store.products(row["guild"],row["category"],limit=8)
-            if products:
-                self.add_view(CatalogView(products,row["category"]))
-        for row in self.store.many("SELECT guild FROM config"):
-            guild=SimpleNamespace(id=row["guild"],emojis=[])
-            self.add_view(Panel("promo",self.store,guild))
-        test_guild=os.getenv("DISCORD_GUILD_ID","").strip()
-        if test_guild:
-            obj=discord.Object(id=int(test_guild))
+        await EMOJIS.sync(self)
+        test_guild = os.getenv("DISCORD_GUILD_ID", "").strip()
+        if test_guild.isdigit():
+            # Mode test : commandes instantanées sur un serveur, et plus aucune commande globale
+            # (sinon chaque commande apparaîtrait en double).
+            obj = discord.Object(id=int(test_guild))
             self.tree.copy_global_to(guild=obj)
-            synced=await self.tree.sync(guild=obj)
-            LOG.info("Synced %s NATIX commands to guild %s",len(synced),test_guild)
+            synced = await self.tree.sync(guild=obj)
+            self.tree.clear_commands(guild=None)
+            await self.tree.sync()
+            LOG.info("%s commandes NATIX synchronisées sur le serveur %s (globales vidées)", len(synced), test_guild)
         else:
-            synced=await self.tree.sync()
-            LOG.info("Synced %s NATIX global commands",len(synced))
-        if not self.settle_giveaways.is_running():
-            self.settle_giveaways.start()
+            synced = await self.tree.sync()
+            LOG.info("%s commandes NATIX globales : %s", len(synced), ", ".join(sorted(c.name for c in synced)))
+        if not self.giveaway_loop.is_running():
+            self.giveaway_loop.start()
 
     async def on_ready(self):
-        LOG.info("NATIX logged in as %s (guilds: %s)",self.user,len(self.guilds))
-        # Remove stale *guild-scoped* commands left by older bot versions.
-        # Global commands are synchronized in setup_hook() from the new 9-command tree.
-        if getattr(self,"_legacy_commands_cleaned",False):
+        LOG.info("NATIX connecté en tant que %s (%s serveurs)", self.user, len(self.guilds))
+        if self._cleaned:
             return
-        self._legacy_commands_cleaned=True
-        testing=os.getenv("DISCORD_GUILD_ID","").strip()
+        self._cleaned = True
+        # Supprime les anciennes commandes propres à chaque serveur (versions précédentes).
+        test_guild = os.getenv("DISCORD_GUILD_ID", "").strip()
         for guild in self.guilds:
-            if testing and str(guild.id)==testing:
+            self.store.ensure_defaults(guild.id)
+            if str(guild.id) == test_guild:
                 continue
             try:
-                obj=discord.Object(id=guild.id)
-                self.tree.clear_commands(guild=obj)
-                cleaned=await self.tree.sync(guild=obj)
-                LOG.info("Removed old NATIX guild commands on %s (remaining=%s)",
-                         guild.id,len(cleaned))
-            except discord.HTTPException:
-                LOG.exception("Could not clear old guild-specific commands on %s",guild.id)
+                old = await self.tree.fetch_commands(guild=guild)
+                if old:
+                    self.tree.clear_commands(guild=guild)
+                    await self.tree.sync(guild=guild)
+                    LOG.info("%s anciennes commandes supprimées sur %s", len(old), guild.id)
+            except discord.HTTPException as exc:
+                LOG.warning("Nettoyage des commandes impossible sur %s : %s", guild.id, exc)
 
-    @tasks.loop(seconds=45)
-    async def settle_giveaways(self):
-        rows=self.store.many("SELECT message FROM giveaways WHERE closed=0 AND ends<=?",
-                             (int(time.time()),))
-        for row in rows:
+    async def on_guild_join(self, guild):
+        self.store.ensure_defaults(guild.id)
+
+    async def on_interaction(self, interaction: discord.Interaction):
+        await route(interaction)
+
+    async def on_guild_channel_delete(self, channel):
+        t = self.store.ticket(channel.id)
+        if t and t["state"] != "deleted":
+            self.store.set_ticket(channel.id, state="deleted")
+            if t["kind"] == "trade":
+                self.store.set_trade_state_by_channel(channel.id, "deleted")
+
+    @tasks.loop(seconds=30)
+    async def giveaway_loop(self):
+        for g in self.store.due_giveaways():
             try:
-                await finish_giveaway(self,row["message"])
+                LOG.info("Giveaway %s : %s", g["message"], await finish_giveaway(self, g["message"]))
             except Exception:
-                LOG.exception("Giveaway settlement failed %s",row["message"])
+                LOG.exception("Clôture du giveaway %s impossible", g["message"])
 
-    @settle_giveaways.before_loop
-    async def before_settle(self):
+    @giveaway_loop.before_loop
+    async def _wait(self):
         await self.wait_until_ready()
 
-async def finish_giveaway(bot,message_id):
-    db=bot.store
-    game=db.giveaway(message_id)
-    if not game:return "Concours introuvable."
-    if game["closed"]:return "Ce concours est déjà terminé."
-    # Mark first to avoid awarding two winners on concurrent settlement.
-    cursor=db.execute("UPDATE giveaways SET closed=1 WHERE message=? AND closed=0",(message_id,))
-    if not cursor.rowcount:return "Déjà clôturé."
-    entries=db.giveaway_entries(message_id)
-    winner=secrets.SystemRandom().choice(entries) if entries else None
-    channel=bot.get_channel(game["channel"])
-    if channel is None:
-        try:channel=await bot.fetch_channel(game["channel"])
-        except discord.HTTPException:
-            LOG.warning("Giveaway channel unavailable: %s",game["channel"])
-            return "Concours clôturé, salon introuvable."
-    try:
-        message=await channel.fetch_message(message_id)
-        await message.edit(view=GiveawayPanel(game["prize"],True,len(entries)))
-        await channel.send("🏆 **NATIX · Résultat du giveaway**\n"
-            +safe(game["prize"],100)+"\n"
-            +("<@"+str(winner)+">" if winner else "Aucun participant."),
-            allowed_mentions=discord.AllowedMentions.none())
-    except discord.HTTPException:
-        LOG.exception("Could not publish giveaway winner")
-        return "Concours clôturé, résultat non publié (erreur Discord)."
-    return "Concours terminé, gagnant tiré."
 
 def launch():
-    logging.basicConfig(level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s %(message)s")
-    token=os.getenv("DISCORD_TOKEN","").strip()
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    token = os.getenv("DISCORD_TOKEN", "").strip()
     if not token:
         raise RuntimeError("DISCORD_TOKEN manquant : configure la variable sur Railway.")
-    bot=Natix()
-    bot.run(token,log_handler=None)
+    Natix().run(token, log_handler=None)

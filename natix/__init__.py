@@ -1,2 +1,2 @@
-"""NATIX premium Discord marketplace. All modules are shop-focused."""
-__version__ = "2.0.0"
+"""NATIX premium Discord marketplace. Boutique Discord premium (Components V2)."""
+__version__ = "3.0.0"

@@ -1,10 +1,11 @@
-name: NATIX focused smoke tests
+name: NATIX tests
 on:
   push:
-    branches: [main, natix-clean-commands-banner]
+    branches: [main]
+  pull_request:
   workflow_dispatch:
 jobs:
-  smoke:
+  tests:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -13,60 +14,4 @@ jobs:
           python-version: '3.12'
       - run: python -m pip install -r requirements.txt
       - run: python -m compileall -q main.py natix
-      - name: Validate seven screenshot panels, banner, and nine clean commands
-        run: |
-          python - <<'PY'
-          from PIL import Image
-          from natix.assets import PANELS,banner
-          from natix.db import Store
-          from natix.panels import Panel,CatalogView,TicketControls,GiveawayPanel
-          from natix.bot import Natix
-          db=Store(":memory:")
-          db.configure(1,staff=123,category=456,logs=789,
-                       social_discord="https://discord.com",social_tiktok="https://tiktok.com")
-          img=Image.open(banner("NATIX"))
-          assert img.size==(1400,420)
-          assert max(img.getpixel((700,y))[0] for y in range(135,280))>=200
-          bright=sum(1 for x in range(330,1080,3) for y in range(110,304,3)
-                     if min(img.getpixel((x,y)))>190)
-          assert bright>500,bright
-          assert set(("home","shop","support","giveaways","stats","social","terms")).issubset(PANELS)
-          for key in PANELS:
-              view=Panel(key,db)
-              assert view.is_persistent(),key
-              comps=view.to_components()
-              assert 1<=len(comps)<=10,key
-              assert all(x["type"]==17 and len(x["components"])<=10 for x in comps),key
-          welcome=str(Panel("home",db).to_components())
-          assert all(x in welcome for x in ("nav:shop","nav:support","nav:giveaways",
-                     "nav:stats","nav:social","nav:terms"))
-          assert TicketControls().is_persistent()
-          assert GiveawayPanel().is_persistent()
-          pid=db.add_product(1,"nitro","Nitro","Test item","10 EUR",3)
-          oid=db.create_order(1,1,db.product(1,pid),2)
-          assert not db.transition_order(1,oid,"delivered",99)[0]
-          assert db.transition_order(1,oid,"accepted",99)[0]
-          assert db.transition_order(1,oid,"processing",99)[0]
-          assert db.transition_order(1,oid,"delivered",99)[0]
-          assert db.product(1,pid)["stock"]==1
-          assert db.transition_order(1,oid,"delivered",99)[0]
-          assert db.product(1,pid)["stock"]==1
-          db.create_ticket(777,1,1,"order")
-          assert db.claim_ticket(777,22)
-          assert not db.claim_ticket(777,33)
-          assert db.release_ticket(777,22)
-          for n in range(12):db.add_product(1,"nitro","Item "+str(n),"Info","5 EUR",1)
-          page,total=db.products_page(1,"nitro",1,6)
-          assert total==13 and len(page)==6
-          catalog=CatalogView(page,"nitro",1,total)
-          assert all(len(x["components"])<=10 for x in catalog.to_components())
-          bot=Natix(store=db)
-          roots={x.name for x in bot.tree.get_commands()}
-          expected={"home","shop","support","giveaway","stats","social","rules","setup","manage"}
-          assert roots==expected,(roots,expected)
-          assert "emojis" not in roots and "preview" not in roots
-          manage=next(x for x in bot.tree.get_commands() if x.name=="manage")
-          assert manage.get_command("add") and manage.get_command("giveaway")
-          assert manage.get_command("social") and manage.get_command("delete_ticket")
-          print("OK: nine root commands, seven menus, large NATIX logo")
-          PY
+      - run: python -W ignore -m unittest discover -s tests -v
