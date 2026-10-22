@@ -324,9 +324,69 @@ def social_panel(store, guild_id):
     return v, files_for("social", s)
 
 
+def paypal_panel(store, guild_id):
+    """Public payment-information panel.
+
+    No order is paid or marked paid here: the amount and "J'ai payé" button
+    belong inside the private ticket created by an actual purchase.
+    """
+    from urllib.parse import urlsplit
+
+    settings = store.settings(guild_id)
+    name = safe(settings["name"], 40)
+    paypal = (settings.get("paypal") or "").strip()
+    if paypal and not paypal.startswith("https://"):
+        paypal = "https://paypal.me/" + paypal.lstrip("@")
+    if paypal and urlsplit(paypal).hostname not in ("paypal.me", "www.paypal.me"):
+        paypal = ""
+
+    steps = [
+        "Ouvre la boutique NATIX et sélectionne ton produit.",
+        "Clique sur **Commander** : le bot crée un ticket privé.",
+        "Le ticket affiche le **montant exact** et ton bouton **Payer avec PayPal**.",
+        "Après le paiement, clique **J'ai payé** dans le ticket.",
+        "Le staff vérifie le paiement avant de livrer.",
+    ]
+    details = []
+    if paypal:
+        details.append("**PayPal officiel :** " + safe(paypal, 180))
+    if settings.get("paypal_email"):
+        details.append("**Email PayPal :** `" + safe(settings["paypal_email"], 100) + "`")
+    if not details:
+        details.append("**PayPal non configuré.** Un administrateur doit ouvrir /setup → Paiements.")
+
+    actions = []
+    if paypal:
+        actions.append(ui.Button(label="Voir notre PayPal", url=paypal,
+                                 emoji=P("nx_dollar")))
+    shop = store.panels(guild_id, "shop")
+    if shop:
+        msg=shop[0]
+        actions.append(ui.Button(
+            label="Ouvrir la boutique",
+            url=f"https://discord.com/channels/{guild_id}/{msg['channel']}/{msg['message']}",
+            emoji=P("nx_cart")))
+    elements = [
+        *header("shop", settings, f"## {E('nx_dollar')} Paiements · {name}",
+                "Retrouve les informations de paiement et les étapes d'une commande."),
+        ui.Separator(),
+        ui.TextDisplay("### Comment payer\n" +
+                       "\n".join(f"{n}. {step}" for n, step in enumerate(steps,1))),
+        ui.Separator(),
+        ui.TextDisplay("\n".join(details)),
+        ui.Separator(),
+        ui.TextDisplay("-# N'envoie pas d'argent sans ticket de commande et ne partage jamais "
+                       "ton mot de passe, code ou token. « J'ai payé » n'est pas une preuve de paiement.")
+    ]
+    if actions:
+        elements.append(ui.ActionRow(*actions))
+    return view_of(container(*elements)), files_for("shop", settings)
+
+
 PANEL_BUILDERS = {
     "home": home_panel, "shop": shop_panel, "support": support_panel, "exchange": exchange_panel,
     "promo": promo_panel, "reviews": reviews_panel, "rules": rules_panel, "social": social_panel,
+    "paypal": paypal_panel,
 }
 
 
