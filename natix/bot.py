@@ -11,7 +11,7 @@ from discord.ext import tasks
 from .assets import PANELS, safe
 from .commands import register
 from .db import Store
-from .panels import Panel, TicketControls, GiveawayPanel
+from .panels import Panel, TicketControls, GiveawayPanel, CustomPanel
 
 LOG=logging.getLogger("natix.bot")
 
@@ -32,6 +32,9 @@ class Natix(discord.Client):
             self.add_view(Panel(key,self.store))
         self.add_view(TicketControls())
         self.add_view(GiveawayPanel())
+        for record in self.store.custom_panels():
+            if self.store.custom_items(record['id']):
+                self.add_view(CustomPanel(self.store,record))
         test_guild=os.getenv("DISCORD_GUILD_ID","").strip()
         if test_guild:
             obj=discord.Object(id=int(test_guild))
