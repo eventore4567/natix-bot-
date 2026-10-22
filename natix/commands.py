@@ -8,8 +8,8 @@ import time
 import discord
 from discord import app_commands,ui
 
-from .assets import CATEGORIES,PANELS,PLANS,safe,banner,emoji
-from .panels import Panel,GiveawayPanel
+from .assets import CATEGORIES,PANELS,PLANS,TICKET_TYPES,safe,banner,emoji
+from .panels import Panel,GiveawayPanel,CustomPanel
 from .services import create_ticket,export_transcript,is_staff,respond,audit
 
 LOG=logging.getLogger("natix.commands")
@@ -388,6 +388,95 @@ def register(tree):
         await audit(i,"review:moderated",str(id)+" "+str(approve))
 
     tree.add_command(vouch)
+
+    custom=app_commands.Group(name="custom",description="Créer des panneaux NATIX personnalisables")
+    @custom.command(name="create",description="Créer un nouveau panneau avec titre et description")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def custom_create(i:discord.Interaction,title:str,description:str):
+        pid=i.client.store.create_custom_panel(i.guild_id,title,description)
+        await respond(i,"✅ Panneau personnalisé **#"+str(pid)+"** créé. Utilise /custom item pour ajouter des boutons.")
+        await audit(i,"custom:create",str(pid))
+
+    @custom.command(name="item",description="Ajouter un bouton latéral à un panneau")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    @app_commands.choices(action=[
+        app_commands.Choice(name="Ouvrir un ticket",value="ticket"),
+        app_commands.Choice(name="Afficher une catégorie",value="category")])
+    async def custom_item(i:discord.Interaction,panel_id:int,label:str,description:str,
+                          action:app_commands.Choice[str],target:str,emoji:str="🔹"):
+        db=i.client.store;panel=db.custom_panel(i.guild_id,panel_id)
+        if not panel:return await respond(i,"Panneau introuvable.")
+        if len(db.custom_items(panel_id))>=6:
+            return await respond(i,"Maximum de 6 boutons par panneau.")
+        if action.value=="ticket" and target not in TICKET_TYPES:
+            return await respond(i,"Ticket cible invalide. Essaie support, staff, seller, report, trade, promo, order ou partner.")
+        if action.value=="category" and target not in [key for key,_,_ in CATEGORIES]:
+            return await respond(i,"Catégorie invalide. Essaie nitro, decor, boost, bots, food ou other.")
+        if len(emoji)>8: return await respond(i,"Utilise un emoji court, par exemple 🎁.")
+        uid=db.create_custom_item(panel_id,label,description,action.value,target,emoji)
+        await respond(i,"✅ Bouton **#"+str(uid)+"** ajouté. Republie le panneau avec /custom publish.")
+        await audit(i,"custom:item",str(panel_id)+"/"+str(uid))
+
+    @custom.command(name="list",description="Voir tes panneaux et boutons personnalisés")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def custom_list(i:discord.Interaction):
+        db=i.client.store;panels=db.custom_panels(i.guild_id)
+        result=[]
+        for p in panels:
+            rows=db.custom_items(p["id"])
+            result.append("#"+str(p["id"])+" **"+safe(p["title"],60)+"** · "+str(len(rows))+" bouton(s)")
+        await respond(i,"\n".join(result)[:1900] if result else "Aucun panneau personnalisé.")
+
+    @custom.command(name="publish",description="Publier le panneau personnalisé dans un salon")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def custom_publish(i:discord.Interaction,panel_id:int,channel:discord.TextChannel=None):
+        db=i.client.store;panel=db.custom_panel(i.guild_id,panel_id)
+        if not panel:return await respond(i,"Panneau introuvable.")
+        if not db.custom_items(panel_id):
+            return await respond(i,"Ajoute au moins un bouton avec /custom item.")
+        dest=channel or i.channel
+        cfg=db.settings(i.guild_id)
+        view=CustomPanel(db,panel,i.guild)
+        image=None if cfg["banner"] else discord.File(banner(cfg["name"]),filename="natix_banner.png")
+        await i.response.defer(ephemeral=True,thinking=True)
+        msg=await dest.send(view=view,file=image,allowed_mentions=discord.AllowedMentions.none())
+        i.client.add_view(view)
+        await i.followup.send("✅ Panneau publié : "+msg.jump_url,ephemeral=True)
+        await audit(i,"custom:published",str(panel_id))
+
+    @custom.command(name="remove",description="Désactiver un panneau et tous ses boutons")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def custom_remove(i:discord.Interaction,panel_id:int):
+        db=i.client.store
+        p=db.custom_panel(i.guild_id,panel_id)
+        if not p:return await respond(i,"Panneau introuvable.")
+        db.execute("UPDATE custom_panels SET active=0 WHERE guild=? AND id=?",(i.guild_id,panel_id))
+        await respond(i,"Panneau désactivé. Ses anciens boutons ne peuvent plus exécuter d'action.")
+        await audit(i,"custom:removed",str(panel_id))
+    tree.add_command(custom)
+
+    promotions=app_commands.Group(name="promoplan",description="Gérer le texte et les tarifs des promotions NATIX")
+    @promotions.command(name="set",description="Créer ou modifier une formule promotionnelle")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def promo_set(i:discord.Interaction,key:str,title:str,price:str,description:str):
+        if not re.fullmatch("[a-z0-9_-]{2,30}",key):
+            return await respond(i,"Identifiant : lettres minuscules, chiffres, - ou _, de 2 à 30 caractères.")
+        i.client.store.set_promo_plan(i.guild_id,key,title,price,description)
+        await respond(i,"✅ Plan **"+safe(title,40)+"** enregistré. Republie /promo.")
+        await audit(i,"promoplan:set",key)
+
+    @promotions.command(name="list",description="Voir les offres de promotion configurées")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def promo_list(i:discord.Interaction):
+        plans=i.client.store.promo_plans(i.guild_id)
+        await respond(i,"\n".join(k+" · "+safe(name)+" · "+safe(detail) for k,name,detail in plans)[:1900])
+
+    @promotions.command(name="disable",description="Désactiver une offre promotionnelle personnalisée")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def promo_disable(i:discord.Interaction,key:str):
+        r=i.client.store.execute("UPDATE promo_plans SET active=0 WHERE guild=? AND plan_key=?",(i.guild_id,key))
+        await respond(i,"Offre désactivée." if r.rowcount else "Offre personnalisée introuvable.")
+    tree.add_command(promotions)
 
     @tree.command(name="help",description="Aide et liste des commandes NATIX")
     async def help_cmd(i:discord.Interaction):
