@@ -372,6 +372,29 @@ async def review_action(i,key):
 async def dispatch(i,key):
     try:
         if not i.guild:return await respond(i,"Commande disponible dans un serveur uniquement.")
+        if key.startswith("nav:"):
+            from .assets import PANELS,banner
+            from .panels import Panel
+            mode=key[4:]
+            if mode=="orders":
+                entries=store(i).orders(i.guild_id,i.user.id,limit=12)
+                if not entries:
+                    return await respond(i,"Tu n'as aucune commande NATIX.")
+                text="\n".join(
+                    "#"+str(row["id"])+" · "+safe(row["product_name"],40)
+                    +" · "+row["state"] for row in entries
+                )
+                return await respond(i,"**Mes commandes NATIX**\n"+text[:1600])
+            if mode not in PANELS:
+                return await respond(i,"Cette rubrique n'existe pas.")
+            current=store(i).settings(i.guild_id)
+            attachment=(discord.File(banner(),filename="natix_banner.png")
+                        if mode not in ("reviews",) and not current["banner"] else None)
+            return await i.response.send_message(
+                view=Panel(mode,store(i),i.guild),
+                file=attachment,ephemeral=True,
+                allowed_mentions=discord.AllowedMentions.none()
+            )
         if key.startswith("custom:"):
             try: item_id=int(key[7:])
             except ValueError:return await respond(i,"Bouton invalide.")
