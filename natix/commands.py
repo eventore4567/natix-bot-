@@ -435,7 +435,8 @@ def register(tree):
             return await respond(i,"Ticket cible invalide. Essaie support, staff, seller, report, trade, promo, order ou partner.")
         if action.value=="category" and target not in [key for key,_,_ in CATEGORIES]:
             return await respond(i,"Catégorie invalide. Essaie nitro, decor, boost, bots, food ou other.")
-        if len(emoji)>8: return await respond(i,"Utilise un emoji court, par exemple 🎁.")
+        if len(emoji)>8 and not re.fullmatch(r"nx_[a-z]{2,10}",emoji):
+            return await respond(i,"Utilise un emoji court ou un emoji NATIX, par exemple nx_shop.")
         uid=db.create_custom_item(panel_id,label,description,action.value,target,emoji)
         await respond(i,"✅ Bouton **#"+str(uid)+"** ajouté. Republie le panneau avec /custom publish.")
         await audit(i,"custom:item",str(panel_id)+"/"+str(uid))
@@ -515,8 +516,8 @@ def register(tree):
             allowed=TICKET_TYPES if row["action_kind"]=="ticket" else [key for key,_,_ in CATEGORIES]
             if target not in allowed:
                 return await respond(i,"Destination invalide pour ce bouton.")
-        if emoji is not None and len(emoji)>8:
-            return await respond(i,"Utilise un emoji court (ex. 🎁).")
+        if emoji is not None and len(emoji)>8 and not re.fullmatch(r"nx_[a-z]{2,10}",emoji):
+            return await respond(i,"Emoji invalide. Exemple : 🎁 ou nx_shop.")
         changes={"label":label[:70] if label is not None else row["label"],
                  "description":description[:160] if description is not None else row["description"],
                  "action_value":target if target is not None else row["action_value"],
