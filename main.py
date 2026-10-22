@@ -306,7 +306,9 @@ async def interact(i,key):
         logging.exception("Interaction NATIX")
         await reply(i,"Erreur de traitement. Vérifie les logs.")
 
-intents=discord.Intents.default();intents.members=True;intents.presences=True
+intents=discord.Intents.default()
+intents.members=os.getenv('NATIX_MEMBERS_INTENT','0')=='1'
+intents.presences=os.getenv('NATIX_PRESENCES_INTENT','0')=='1'
 bot=discord.Client(intents=intents,allowed_mentions=discord.AllowedMentions.none())
 tree=app_commands.CommandTree(bot)
 
