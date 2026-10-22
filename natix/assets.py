@@ -17,6 +17,7 @@ CATEGORIES=[
 PANELS={
     "home":"Accueil","shop":"Boutique","support":"Support","giveaways":"Giveaways",
     "stats":"Statistiques","social":"Réseaux","terms":"Règlement",
+    "trade":"Échanges","promo":"Promotions",
 }
 TICKET_TYPES={
     "support":"Support","seller":"Candidature vendeur","staff":"Candidature staff",
