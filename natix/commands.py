@@ -1,621 +1,227 @@
-"""Slash command catalog: one command per Discord panel plus admin workflows."""
+"""NATIX SHOP: small command surface faithful to the server hub reference.
+
+Seven independent public panels, /setup and a single staff /manage group.
+No emoji creation command, no duplicates, no extra unused slash commands.
+"""
 import io
 import logging
-import re
-import secrets
-import time
-from types import SimpleNamespace
+from urllib.parse import urlsplit
 
 import discord
-from discord import app_commands,ui
+from discord import app_commands
 
-from .assets import CATEGORIES,PANELS,PLANS,TICKET_TYPES,safe,banner,emoji
-from .panels import Panel,GiveawayPanel,CustomPanel,CatalogView
-from .services import create_ticket,export_transcript,archive_ticket,is_staff,respond,audit
+from .assets import CATEGORIES, banner, safe
+from .panels import Panel, GiveawayPanel
+from .services import archive_ticket, is_staff, respond, audit
 
 LOG=logging.getLogger("natix.commands")
-CATEGORIES_CHOICES=[app_commands.Choice(name=name,value=key) for key,name,_ in CATEGORIES]
-PANEL_CHOICES=[app_commands.Choice(name=name,value=key) for key,name in PANELS.items()]
-STATES=[app_commands.Choice(name=name,value=name) for name in ("pending","accepted","processing","delivered","cancelled")]
+CATEGORY_CHOICES=[app_commands.Choice(name=name,value=key) for key,name,_ in CATEGORIES]
+ORDER_STATES=[app_commands.Choice(name=k,value=k)
+              for k in ("accepted","processing","delivered","cancelled")]
+
+async def post_panel(i,kind):
+    if not i.guild:
+        return await respond(i,"Cette commande fonctionne uniquement sur ton serveur.")
+    conf=i.client.store.settings(i.guild_id)
+    view=Panel(kind,i.client.store,i.guild)
+    attachment=(discord.File(banner(),filename="natix_banner.png")
+                if kind not in ("reviews",) and not conf["banner"] else None)
+    await i.response.send_message(view=view,file=attachment,
+                                  allowed_mentions=discord.AllowedMentions.none())
 
 def register(tree):
-    async def publish(i,kind,channel=None,preview=False):
-        if not i.guild:return await respond(i,"Serveur requis.")
-        if not i.user.guild_permissions.manage_guild:
-            return await respond(i,"Gérer le serveur est requis.")
-        cfg=i.client.store.settings(i.guild_id)
-        destination=channel or i.channel
-        if not isinstance(destination,discord.TextChannel):
-            return await respond(i,"Choisis un salon textuel.")
-        image=None
-        if kind!="reviews" and not cfg["banner"]:
-            image=discord.File(banner(cfg["name"]),filename="natix_banner.png")
-        view=Panel(kind,i.client.store,i.guild)
-        if preview:
-            return await i.response.send_message(view=view,file=image,ephemeral=True)
-        await i.response.defer(ephemeral=True,thinking=True)
-        try:
-            msg=await destination.send(view=view,file=image,allowed_mentions=discord.AllowedMentions.none())
-        except discord.Forbidden:
-            return await i.followup.send("Je n'ai pas l'autorisation de publier dans ce salon.",ephemeral=True)
-        await i.followup.send("✅ Panneau **"+PANELS[kind]+"** publié : "+msg.jump_url,ephemeral=True)
-        await audit(i,"panel:published",kind+" #"+str(destination.id))
+    # Only the panel names from the supplied NATIX reference are slash commands.
+    @tree.command(name="home",description="NATIX • Accueil et accès à tous les services")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def cmd_home(i:discord.Interaction):
+        await post_panel(i,"home")
 
-    # Separate commands because each screenshot represents an independent panel.
-    @tree.command(name="shop",description="Publier le panneau de boutique premium")
+    @tree.command(name="shop",description="NATIX • Boutique et produits")
     @app_commands.checks.has_permissions(manage_guild=True)
     async def cmd_shop(i:discord.Interaction):
-        await publish(i,"shop")
+        await post_panel(i,"shop")
 
-    @tree.command(name="support",description="Publier le panneau d'assistance et de tickets")
+    @tree.command(name="support",description="NATIX • Panneau de tickets et assistance")
     @app_commands.checks.has_permissions(manage_guild=True)
     async def cmd_support(i:discord.Interaction):
-        await publish(i,"support")
+        await post_panel(i,"support")
 
-    @tree.command(name="trade",description="Publier les échanges NATIX")
+    @tree.command(name="giveaway",description="NATIX • Panneau des giveaways actifs")
     @app_commands.checks.has_permissions(manage_guild=True)
-    async def cmd_trade(i:discord.Interaction):
-        await publish(i,"trade")
+    async def cmd_giveaway(i:discord.Interaction):
+        await post_panel(i,"giveaways")
 
-    @tree.command(name="promo",description="Publier les offres promotionnelles")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def cmd_promo(i:discord.Interaction):
-        await publish(i,"promo")
-
-    @tree.command(name="rules",description="Publier les conditions de vente")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def cmd_rules(i:discord.Interaction):
-        await publish(i,"terms")
-
-    @tree.command(name="supporter",description="Publier le panneau supporter")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def cmd_supporter(i:discord.Interaction):
-        await publish(i,"supporter")
-
-    @tree.command(name="reviews",description="Publier les boutons d'avis clients")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def cmd_reviews(i:discord.Interaction):
-        await publish(i,"reviews")
-
-    @tree.command(name="faq",description="Publier la FAQ")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def cmd_faq(i:discord.Interaction):
-        await publish(i,"faq")
-
-    @tree.command(name="partners",description="Publier les partenaires")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def cmd_partners(i:discord.Interaction):
-        await publish(i,"partners")
-
-    @tree.command(name="statistics",description="Publier les statistiques de la boutique")
+    @tree.command(name="stats",description="NATIX • Statistiques de la boutique")
     @app_commands.checks.has_permissions(manage_guild=True)
     async def cmd_stats(i:discord.Interaction):
-        await publish(i,"stats")
+        await post_panel(i,"stats")
 
-    @tree.command(name="vouch",description="Publier le panneau de témoignages")
+    @tree.command(name="social",description="NATIX • Liens officiels et réseaux")
     @app_commands.checks.has_permissions(manage_guild=True)
-    async def cmd_vouch(i:discord.Interaction):
-        await publish(i,"vouch")
+    async def cmd_social(i:discord.Interaction):
+        await post_panel(i,"social")
 
-    @tree.command(name="panel",description="Prévisualiser ou publier un panneau dans un autre salon")
+    @tree.command(name="rules",description="NATIX • Règlement de la boutique")
     @app_commands.checks.has_permissions(manage_guild=True)
-    @app_commands.choices(type=PANEL_CHOICES)
-    async def cmd_panel(i:discord.Interaction,type:app_commands.Choice[str],
-                        channel:discord.TextChannel=None,preview:bool=False):
-        await publish(i,type.value,channel,preview)
+    async def cmd_rules(i:discord.Interaction):
+        await post_panel(i,"terms")
 
-    @tree.command(name="preview",description="Prévisualiser un panneau NATIX sans le publier")
+    @tree.command(name="setup",description="NATIX • Configurer tickets, staff et archives")
     @app_commands.checks.has_permissions(manage_guild=True)
-    @app_commands.choices(type=PANEL_CHOICES)
-    async def cmd_preview(i:discord.Interaction,type:app_commands.Choice[str]):
-        await publish(i,type.value,preview=True)
-
-    @tree.command(name="setup",description="Configurer staff, tickets, logs et commandes")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def cmd_setup(i:discord.Interaction,staff_role:discord.Role,ticket_category:discord.CategoryChannel,
-                        logs:discord.TextChannel=None,vouch_channel:discord.TextChannel=None):
-        i.client.store.configure(i.guild_id,staff=staff_role.id,category=ticket_category.id,
-                        logs=logs.id if logs else 0,
-                        vouch_channel=vouch_channel.id if vouch_channel else 0)
-        await respond(i,"✅ **NATIX configuré !**\nStaff : "+staff_role.mention+
-                      "\nTickets : "+ticket_category.name+
-                      "\nLogs : "+(logs.mention if logs else "Non configurés"))
+    async def cmd_setup(i:discord.Interaction,staff_role:discord.Role,
+                        tickets:discord.CategoryChannel,logs:discord.TextChannel):
+        if logs.category_id==tickets.id:
+            return await respond(i,"Le salon des archives doit rester privé et séparé des tickets.")
+        everyone=i.guild.default_role
+        perms=logs.overwrites_for(everyone)
+        if perms.view_channel is not False and logs.permissions_for(everyone).view_channel:
+            return await respond(i,"Le salon de logs doit être caché aux membres (@everyone).")
+        i.client.store.configure(i.guild_id,staff=staff_role.id,
+                                 category=tickets.id,logs=logs.id)
+        await respond(i,"✅ NATIX configuré : staff "+staff_role.mention+
+             ", tickets **"+safe(tickets.name,70)+"**, archives "+logs.mention+".")
         await audit(i,"setup:updated",str(staff_role.id))
 
-    @tree.command(name="brand",description="Configurer la bannière NATIX, la couleur et le nom")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def cmd_brand(i:discord.Interaction,title:str="NATIX",color:str="E6E4F0",
-                        banner_url:str=""):
-        if not re.fullmatch(r"#?[a-fA-F0-9]{6}",color):
-            return await respond(i,"Couleur hexadécimale invalide (ex : E6E4F0).")
-        if banner_url and (not banner_url.startswith("https://") or len(banner_url)>1000):
-            return await respond(i,"La bannière doit être une URL HTTPS valide.")
-        i.client.store.configure(i.guild_id,name=title[:15],color=color.strip("#"),
-                                  banner=banner_url)
-        await respond(i,"✅ Identité NATIX mise à jour pour les futurs panneaux.")
-        await audit(i,"brand:updated",title[:15])
+    manage=app_commands.Group(name="manage",description="NATIX • Un seul menu staff pour gérer la boutique")
 
-    @tree.command(name="banner",description="Télécharger la bannière NATIX générée")
-    async def cmd_banner(i:discord.Interaction):
-        cfg=i.client.store.settings(i.guild_id)
-        image=discord.File(banner(cfg["name"]),filename="natix-premium-banner.png")
-        await i.response.send_message("✧ NATIX · Bannière originale",file=image,ephemeral=True)
-
-    @tree.command(name="emojis",description="Installer les emojis premium originaux de NATIX")
+    @manage.command(name="add",description="Ajouter un produit")
     @app_commands.checks.has_permissions(manage_guild=True)
-    async def cmd_emojis(i:discord.Interaction):
-        await i.response.defer(thinking=True,ephemeral=True)
-        added=[];errors=[]
-        for kind in ("shop","cart","gift","ticket","support","trade","star","shield","config"):
-            name="nx_"+kind
-            if discord.utils.get(i.guild.emojis,name=name):
-                continue
-            try:
-                await i.guild.create_custom_emoji(name=name,image=emoji(kind),
-                       reason="NATIX custom emoji pack")
-                added.append(name)
-            except (discord.Forbidden,discord.HTTPException):
-                errors.append(name)
-        await i.followup.send("🎨 **Emojis ajoutés :** "+(", ".join(added) or "Aucun")+
-                              ("\nÀ vérifier (permissions / places) : "+", ".join(errors) if errors else ""),
-                              ephemeral=True)
-
-    @tree.command(name="settings",description="Afficher les réglages actuels de NATIX")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def cmd_settings(i:discord.Interaction):
-        c=i.client.store.settings(i.guild_id)
-        await respond(i,"**NATIX · Configuration**\n"
-            "Rôle staff : "+str(c["staff"])+"\nTickets : "+str(c["category"])+
-            "\nLogs : "+str(c["logs"])+"\nCouleur : #"+c["color"]+
-            "\nNom : "+safe(c["name"])+"\nSupporter : "+str(c["supporter_role"]))
-
-    @tree.command(name="diagnostic",description="Vérifier les permissions, la boutique et les données NATIX")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def cmd_diagnostic(i:discord.Interaction):
-        settings=i.client.store.settings(i.guild_id)
-        me=i.guild.me
-        perm=me.guild_permissions if me else None
-        tests=[
-            ("Salon des tickets",bool(i.guild.get_channel(settings["category"]))),
-            ("Rôle du staff",bool(i.guild.get_role(settings["staff"]))),
-            ("Création de salons",bool(perm and perm.manage_channels)),
-            ("Envoi de messages",bool(perm and perm.send_messages)),
-            ("Lecture de l'historique",bool(perm and perm.read_message_history)),
-            ("Gestion des rôles",bool(perm and perm.manage_roles)),
-            ("Intents membres",bool(i.client.intents.members)),
-            ("Intents présences (statut)",bool(i.client.intents.presences))
-        ]
-        try:
-            i.client.store.one("SELECT 1 AS ok")
-            tests.append(("Base de données",True))
-        except Exception:
-            tests.append(("Base de données",False))
-        rows=["## NATIX • Diagnostic"]+[
-            ("✅ " if valid else "⚠️ ")+label for label,valid in tests]
-        rows+=["\n-# Les intents optionnels sont nécessaires uniquement aux fonctions qui les utilisent."]
-        await respond(i,"\n".join(rows))
-    @tree.command(name="textconfig",description="Personnaliser les conditions, FAQ ou partenaires")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    @app_commands.choices(type=[
-        app_commands.Choice(name="Conditions",value="rules"),
-        app_commands.Choice(name="FAQ",value="faq"),
-        app_commands.Choice(name="Partenaires",value="partners"),
-    ])
-    async def cmd_textconfig(i:discord.Interaction,type:app_commands.Choice[str],text:str):
-        i.client.store.configure(i.guild_id,**{type.value:text[:2900]})
-        await respond(i,"✅ Texte **"+type.name+"** enregistré.")
-        await audit(i,"textconfig",type.value)
-
-    @tree.command(name="supporter_config",description="Configurer le rôle et le statut Supporters")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def cmd_supporterconfig(i:discord.Interaction,role:discord.Role,status_prefix:str=".gg/natix"):
-        i.client.store.configure(i.guild_id,supporter_role=role.id,status=status_prefix[:80])
-        await respond(i,"✅ Supporter : "+role.mention+" · "+safe(status_prefix,80))
-
-    @tree.command(name="announcement",description="Publier une annonce NATIX sans ping automatique")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def cmd_announcement(i:discord.Interaction,channel:discord.TextChannel,title:str,message:str):
-        embed=discord.Embed(title="✧ "+safe(title,160),description=safe(message,3200),
-                            colour=discord.Colour(0xDDD3EE))
-        embed.set_footer(text="NATIX · Official Announcement")
-        await channel.send(embed=embed,allowed_mentions=discord.AllowedMentions.none())
-        await respond(i,"✅ Annonce publiée sans mention automatique.")
-        await audit(i,"announcement",str(channel.id))
-
-    product=app_commands.Group(name="product",description="Ajouter, modifier, supprimer et réapprovisionner les produits")
-    @product.command(name="add",description="Ajouter un produit à une catégorie")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    @app_commands.choices(category=CATEGORIES_CHOICES)
-    async def prod_add(i:discord.Interaction,category:app_commands.Choice[str],name:str,
-                       price:str,details:str,stock:int=-1):
-        if stock< -1:return await respond(i,"Le stock doit valoir -1 (illimité) ou plus.")
-        pid=i.client.store.add_product(i.guild_id,category.value,name[:90],
-                       details[:500],price[:60],stock)
-        i.client.add_view(CatalogView(i.client.store.products(i.guild_id,category.value,limit=8),category.value))
-        await respond(i,"✅ Produit **#"+str(pid)+"** ajouté à "+category.name+".")
+    @app_commands.choices(category=CATEGORY_CHOICES)
+    async def add(i:discord.Interaction,category:app_commands.Choice[str],
+                  name:str,price:str,description:str,stock:int=-1):
+        if stock < -1:
+            return await respond(i,"Stock : -1 (illimité) ou un nombre positif.")
+        pid=i.client.store.add_product(i.guild_id,category.value,
+            name[:80],description[:400],price[:50],stock)
+        await respond(i,"Produit **#"+str(pid)+"** créé. Il apparaît dans /shop.")
         await audit(i,"product:add",str(pid))
 
-    @product.command(name="edit",description="Modifier le prix, nom, description et catégorie d'un produit")
+    @manage.command(name="edit",description="Modifier un produit existant")
     @app_commands.checks.has_permissions(manage_guild=True)
-    @app_commands.choices(category=CATEGORIES_CHOICES)
-    async def prod_edit(i:discord.Interaction,id:int,name:str=None,price:str=None,
-                        description:str=None,category:app_commands.Choice[str]=None):
-        changes={}
-        if name is not None:changes["name"]=name[:90]
-        if price is not None:changes["price"]=price[:60]
-        if description is not None:changes["details"]=description[:500]
-        if category is not None:changes["category"]=category.value
-        changed=i.client.store.modify_product(i.guild_id,id,**changes)
-        await respond(i,"✅ Produit modifié." if changed else "Produit introuvable ou aucun changement.")
+    async def edit(i:discord.Interaction,id:int,name:str=None,
+                   price:str=None,description:str=None):
+        updates={}
+        if name is not None:updates["name"]=name[:80]
+        if price is not None:updates["price"]=price[:50]
+        if description is not None:updates["details"]=description[:400]
+        if not updates:
+            return await respond(i,"Indique au moins un champ à modifier.")
+        changed=i.client.store.modify_product(i.guild_id,id,**updates)
+        await respond(i,"Produit mis à jour." if changed else "Produit introuvable.")
         if changed:await audit(i,"product:edit",str(id))
 
-    @product.command(name="remove",description="Retirer un produit sans supprimer les anciennes commandes")
+    @manage.command(name="remove",description="Retirer un produit de la boutique")
     @app_commands.checks.has_permissions(manage_guild=True)
-    async def prod_remove(i:discord.Interaction,id:int):
-        ok=i.client.store.modify_product(i.guild_id,id,active=0)
-        await respond(i,"✅ Produit retiré." if ok else "Produit introuvable.")
-        if ok:await audit(i,"product:remove",str(id))
+    async def remove(i:discord.Interaction,id:int):
+        changed=i.client.store.modify_product(i.guild_id,id,active=0)
+        await respond(i,"Produit désactivé." if changed else "Produit introuvable.")
+        if changed:await audit(i,"product:remove",str(id))
 
-    @product.command(name="list",description="Lister les produits et leurs identifiants")
+    @manage.command(name="stock",description="Modifier le stock d'un produit")
     @app_commands.checks.has_permissions(manage_guild=True)
-    async def prod_list(i:discord.Interaction):
-        products=i.client.store.products(i.guild_id,limit=40)
-        lines=["**NATIX · Catalogue**"]+[
-          "#"+str(p["id"])+" · "+safe(p["name"],38)+" · "+safe(p["price"],35)+
-          " · Stock "+str(p["stock"]) for p in products]
-        await respond(i,"\n".join(lines)[:1900] if products else "Catalogue vide.")
+    async def stock(i:discord.Interaction,id:int,quantity:int):
+        if quantity < -1:
+            return await respond(i,"Stock : -1 (illimité) ou un nombre positif.")
+        changed=i.client.store.modify_product(i.guild_id,id,stock=quantity)
+        await respond(i,"Stock actualisé : "+str(quantity) if changed else "Produit introuvable.")
+        if changed:await audit(i,"product:stock",str(id)+"="+str(quantity))
 
-    @product.command(name="restock",description="Changer le stock et publier facultativement un réassort")
+    @manage.command(name="products",description="Voir les identifiants, prix et stocks")
     @app_commands.checks.has_permissions(manage_guild=True)
-    async def prod_restock(i:discord.Interaction,id:int,quantity:int,announce:bool=False):
-        if quantity< -1:return await respond(i,"Stock invalide.")
-        product=i.client.store.product(i.guild_id,id)
-        if not product:return await respond(i,"Produit introuvable.")
-        i.client.store.modify_product(i.guild_id,id,stock=quantity)
-        await respond(i,"✅ Stock mis à jour : "+str(quantity))
-        if announce:
-            await i.channel.send("📦 **NATIX RESTOCK** · "+safe(product["name"])+
-                "\nStock : "+("illimité" if quantity<0 else str(quantity)),
-                allowed_mentions=discord.AllowedMentions.none())
-        await audit(i,"product:restock",str(id)+"="+str(quantity))
+    async def products(i:discord.Interaction):
+        rows=i.client.store.products(i.guild_id,limit=30)
+        if not rows:return await respond(i,"Boutique vide. Ajoute un produit avec /manage add.")
+        lines=["**NATIX • Catalogue staff**"]
+        for item in rows:
+            lines.append("#"+str(item["id"])+" — "+safe(item["name"],35)
+                         +" · "+safe(item["price"],25)+" · stock "+str(item["stock"]))
+        await respond(i,"\n".join(lines)[:1900])
 
-    tree.add_command(product)
+    @manage.command(name="orders",description="Afficher les commandes en attente")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def orders(i:discord.Interaction):
+        rows=i.client.store.orders(i.guild_id,limit=25)
+        if not rows:return await respond(i,"Aucune commande.")
+        await respond(i,"\n".join(
+            "#"+str(o["id"])+" — "+safe(o["product_name"],45)
+            +" — "+o["state"] for o in rows)[:1900])
 
-    orders=app_commands.Group(name="order",description="Voir et gérer les commandes enregistrées")
-    @orders.command(name="mine",description="Voir tes propres commandes")
-    async def orders_mine(i:discord.Interaction):
-        rows=i.client.store.orders(i.guild_id,i.user.id)
-        await respond(i,"\n".join("#"+str(x["id"])+" · "+safe(x["product_name"],45)+
-              " · "+str(x["quantity"])+" · "+x["state"] for x in rows)[:1900]
-              if rows else "Tu n'as aucune commande.")
+    @manage.command(name="order",description="Accepter, préparer ou livrer une commande")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    @app_commands.choices(state=ORDER_STATES)
+    async def order(i:discord.Interaction,id:int,state:app_commands.Choice[str]):
+        ok,message=i.client.store.transition_order(i.guild_id,id,state.value,i.user.id)
+        await respond(i,("✅ " if ok else "⚠️ ")+message)
+        if ok:await audit(i,"order:state",str(id)+"="+state.value)
 
-    @orders.command(name="list",description="Lister les dernières commandes (staff)")
-    async def orders_list(i:discord.Interaction):
-        if not is_staff(i):return await respond(i,"Réservé au staff.")
-        rows=i.client.store.orders(i.guild_id,limit=30)
-        await respond(i,"\n".join("#"+str(x["id"])+" · <@"+str(x["buyer"])+"> · "+
-                    safe(x["product_name"],30)+" · "+x["state"] for x in rows)[:1900]
-                    if rows else "Aucune commande.")
+    @manage.command(name="giveaway",description="Créer un giveaway avec un vrai tirage")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def make_giveaway(i:discord.Interaction,prize:str,
+                            minutes:app_commands.Range[int,1,10080]):
+        if not i.guild:
+            return await respond(i,"Disponible sur un serveur.")
+        await i.response.send_message(view=GiveawayPanel(prize))
+        message=await i.original_response()
+        import time
+        i.client.store.execute(
+            "INSERT INTO giveaways(message,channel,prize,ends,closed) VALUES (?,?,?,?,0)",
+            (message.id,i.channel_id,prize[:120],int(time.time())+minutes*60)
+        )
+        await audit(i,"giveaway:new",str(message.id))
 
-    @orders.command(name="status",description="Modifier l'état d'une commande")
-    @app_commands.choices(state=STATES)
-    async def order_status(i:discord.Interaction,id:int,state:app_commands.Choice[str]):
-        if not is_staff(i):return await respond(i,"Réservé au staff.")
-        db=i.client.store
-        order=db.order(i.guild_id,id)
-        if not order:return await respond(i,"Commande introuvable.")
-        success,message=db.transition_order(i.guild_id,id,state.value,i.user.id)
-        await respond(i,("✅ " if success else "⚠️ ")+message)
-        if success and order["state"]!=state.value:
-            await audit(i,"order:status",str(id)+"="+state.value)
+    @manage.command(name="social",description="Définir les liens officiels du serveur")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def social(i:discord.Interaction,discord_url:str=None,
+                     tiktok_url:str=None,website_url:str=None):
+        values={}
+        for key,value in (
+            ("social_discord",discord_url),("social_tiktok",tiktok_url),
+            ("social_site",website_url)
+        ):
+            if value is None:continue
+            url=value.strip()
+            if url and (len(url)>220 or urlsplit(url).scheme!="https" or
+                        not urlsplit(url).netloc):
+                return await respond(i,"Utilise des liens HTTPS valides.")
+            values[key]=url
+        if not values:return await respond(i,"Indique au moins un lien.")
+        i.client.store.configure(i.guild_id,**values)
+        await respond(i,"Liens officiels enregistrés. Republie /social.")
+        await audit(i,"social:update",",".join(values))
 
-    @orders.command(name="details",description="Afficher les informations d'une commande")
-    async def order_details(i:discord.Interaction,id:int):
-        r=i.client.store.order(i.guild_id,id)
-        if not r:return await respond(i,"Commande introuvable.")
-        if not is_staff(i) and i.user.id!=r["buyer"]:
-            return await respond(i,"Cette commande ne t'appartient pas.")
-        await respond(i,"**Commande #"+str(r["id"])+"**\nProduit : "+safe(r["product_name"])+
-                      "\nQuantité : "+str(r["quantity"])+"\nPrix annoncé : "+safe(r["price"])+
-                      "\nStatut : "+r["state"]+"\nCréation : <t:"+str(r["created"])+":F>\n"+
-                      safe(r["notes"],500))
+    @manage.command(name="rules",description="Modifier le règlement de la boutique")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def rules(i:discord.Interaction,text:str):
+        i.client.store.configure(i.guild_id,rules=text[:2900])
+        await respond(i,"Règlement enregistré. Republie /rules.")
+        await audit(i,"rules:update","")
 
-    tree.add_command(orders)
-
-    tickets=app_commands.Group(name="ticket",description="Gestion des tickets NATIX")
-    @tickets.command(name="close",description="Fermer le ticket actuel")
-    async def t_close(i:discord.Interaction):
-        from .services import ticket_action
-        await ticket_action(i,"close")
-
-    @tickets.command(name="reopen",description="Rouvrir le ticket actuel")
-    async def t_reopen(i:discord.Interaction):
-        from .services import ticket_action
-        await ticket_action(i,"reopen")
-
-    @tickets.command(name="claim",description="Prendre officiellement en charge un ticket ouvert")
-    async def t_claim(i:discord.Interaction):
-        from .services import ticket_action
-        await ticket_action(i,"claim")
-
-    @tickets.command(name="unclaim",description="Libérer le ticket attribué")
-    async def t_unclaim(i:discord.Interaction):
-        from .services import ticket_action
-        await ticket_action(i,"unclaim")
-
-    @tickets.command(name="transcript",description="Exporter tout l'historique du ticket")
-    async def t_transcript(i:discord.Interaction):await export_transcript(i)
-
-    @tickets.command(name="delete",description="Supprimer un ticket fermé")
-    async def t_delete(i:discord.Interaction):
-        if not is_staff(i):return await respond(i,"Réservé au staff.")
-        db=i.client.store
-        row=db.ticket(i.channel_id)
-        if not row:return await respond(i,"Ceci n'est pas un ticket NATIX.")
-        if row["state"]!="closed":
-            return await respond(i,"Ferme le ticket avant suppression.")
+    @manage.command(name="delete_ticket",description="Archiver puis supprimer un ticket fermé")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def delete_ticket(i:discord.Interaction):
+        row=i.client.store.ticket(i.channel_id)
+        if not row or row["state"]!="closed":
+            return await respond(i,"Ferme ce ticket NATIX avant de le supprimer.")
         await i.response.defer(ephemeral=True,thinking=True)
-        try:
-            archived,detail=await archive_ticket(i)
-        except Exception:
-            LOG.exception("Ticket archive failed before deletion")
-            return await i.followup.send("Archivage impossible : le ticket est conservé.",ephemeral=True)
+        archived,detail=await archive_ticket(i)
         if not archived:
             return await i.followup.send(detail,ephemeral=True)
         try:
-            await i.channel.delete(reason="NATIX ticket archived and deleted by "+str(i.user.id))
+            await i.channel.delete(reason="NATIX transcript archived; ticket deleted by staff")
         except discord.HTTPException:
-            return await i.followup.send("Archive envoyée mais suppression du salon refusée par Discord.",ephemeral=True)
-        db.state_ticket(i.channel_id,"deleted")
-        await i.followup.send("✅ Ticket supprimé après archivage : "+detail,ephemeral=True)
+            return await i.followup.send("Archive enregistrée, mais suppression refusée.",ephemeral=True)
+        i.client.store.state_ticket(i.channel_id,"deleted")
+        await i.followup.send("Ticket archivé et supprimé.",ephemeral=True)
 
-    tree.add_command(tickets)
-
-    @tree.command(name="giveaway",description="Lancer un giveaway avec participations et tirage réel")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def cmd_giveaway(i:discord.Interaction,prize:str,
-                           minutes:app_commands.Range[int,1,10080]):
-        await i.response.send_message(view=GiveawayPanel(prize))
-        m=await i.original_response()
-        i.client.store.execute("INSERT INTO giveaways(message,channel,prize,ends,closed) VALUES (?,?,?,?,0)",
-             (m.id,i.channel_id,prize[:130],int(time.time())+minutes*60))
-        await audit(i,"giveaway:created",str(m.id))
-
-    @tree.command(name="giveaway_end",description="Terminer un concours et tirer un gagnant")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def cmd_giveaway_end(i:discord.Interaction,message_id:str):
-        try:mid=int(message_id)
-        except ValueError:return await respond(i,"ID de message invalide.")
-        from .bot import finish_giveaway
-        result=await finish_giveaway(i.client,mid)
-        await respond(i,result)
-
-    @tree.command(name="giveaway_reroll",description="Retirer un nouveau gagnant d'un concours terminé")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def cmd_giveaway_reroll(i:discord.Interaction,message_id:str):
-        try:mid=int(message_id)
-        except ValueError:return await respond(i,"ID invalide.")
-        db=i.client.store
-        g=db.giveaway(mid)
-        if not g or not g["closed"]:return await respond(i,"Giveaway introuvable ou encore actif.")
-        channel=i.guild.get_channel(g["channel"])
-        if not channel:return await respond(i,"Salon du concours inaccessible.")
-        entries=db.giveaway_entries(mid)
-        if not entries:return await respond(i,"Pas de participants.")
-        winner=secrets.SystemRandom().choice(entries)
-        await channel.send("🎁 **NATIX reroll** : <@"+str(winner)+">",
-            allowed_mentions=discord.AllowedMentions.none())
-        await respond(i,"Nouveau gagnant tiré dans le salon du concours.")
-
-    vouch=app_commands.Group(name="vouches",description="Validation des vrais avis clients")
-    @vouch.command(name="queue",description="Voir les avis en attente")
-    async def vouch_queue(i:discord.Interaction):
-        if not is_staff(i):return await respond(i,"Réservé au staff.")
-        rows=i.client.store.many("SELECT * FROM reviews WHERE guild=? AND approved=0 ORDER BY id DESC LIMIT 15",(i.guild_id,))
-        await respond(i,"\n\n".join("#"+str(x["id"])+" · ⭐"+str(x["rating"])+
-                  " · <@"+str(x["author"])+"> : "+safe(x["comment"],130) for x in rows)
-                  if rows else "Aucun avis en attente.")
-
-    @vouch.command(name="approve",description="Approuver ou rejeter un témoignage")
-    async def vouch_approve(i:discord.Interaction,id:int,approve:bool=True):
-        if not is_staff(i):return await respond(i,"Réservé au staff.")
-        db=i.client.store
-        row=db.one("SELECT * FROM reviews WHERE id=? AND guild=? AND approved=0",(id,i.guild_id))
-        if not row:return await respond(i,"Avis introuvable.")
-        db.execute("UPDATE reviews SET approved=? WHERE id=?",(1 if approve else -1,id))
-        await respond(i,"✅ Avis "+("approuvé." if approve else "rejeté."))
-        channel=i.guild.get_channel(db.settings(i.guild_id)["vouch_channel"])
-        if approve and channel:
-            await channel.send("⭐ **NATIX · Avis vérifié**\n<@"+str(row["author"])+"> · "+
-                 str(row["rating"])+"/5\n"+safe(row["comment"],800),
-                 allowed_mentions=discord.AllowedMentions.none())
-        await audit(i,"review:moderated",str(id)+" "+str(approve))
-
-    tree.add_command(vouch)
-
-    custom=app_commands.Group(name="custom",description="Créer des panneaux NATIX personnalisables")
-    @custom.command(name="create",description="Créer un nouveau panneau avec titre et description")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def custom_create(i:discord.Interaction,title:str,description:str):
-        pid=i.client.store.create_custom_panel(i.guild_id,title,description)
-        await respond(i,"✅ Panneau personnalisé **#"+str(pid)+"** créé. Utilise /custom item pour ajouter des boutons.")
-        await audit(i,"custom:create",str(pid))
-
-    @custom.command(name="item",description="Ajouter un bouton latéral à un panneau")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    @app_commands.choices(action=[
-        app_commands.Choice(name="Ouvrir un ticket",value="ticket"),
-        app_commands.Choice(name="Afficher une catégorie",value="category")])
-    async def custom_item(i:discord.Interaction,panel_id:int,label:str,description:str,
-                          action:app_commands.Choice[str],target:str,emoji:str="🔹"):
-        db=i.client.store;panel=db.custom_panel(i.guild_id,panel_id)
-        if not panel:return await respond(i,"Panneau introuvable.")
-        if len(db.custom_items(panel_id))>=6:
-            return await respond(i,"Maximum de 6 boutons par panneau.")
-        if action.value=="ticket" and target not in TICKET_TYPES:
-            return await respond(i,"Ticket cible invalide. Essaie support, staff, seller, report, trade, promo, order ou partner.")
-        if action.value=="category" and target not in [key for key,_,_ in CATEGORIES]:
-            return await respond(i,"Catégorie invalide. Essaie nitro, decor, boost, bots, food ou other.")
-        if len(emoji)>8 and not re.fullmatch(r"nx_[a-z]{2,10}",emoji):
-            return await respond(i,"Utilise un emoji court ou un emoji NATIX, par exemple nx_shop.")
-        uid=db.create_custom_item(panel_id,label,description,action.value,target,emoji)
-        await respond(i,"✅ Bouton **#"+str(uid)+"** ajouté. Republie le panneau avec /custom publish.")
-        await audit(i,"custom:item",str(panel_id)+"/"+str(uid))
-
-    @custom.command(name="list",description="Voir tes panneaux et boutons personnalisés")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def custom_list(i:discord.Interaction):
-        db=i.client.store;panels=db.custom_panels(i.guild_id)
-        result=[]
-        for p in panels:
-            rows=db.custom_items(p["id"])
-            result.append("#"+str(p["id"])+" **"+safe(p["title"],60)+"** · "+str(len(rows))+" bouton(s)")
-        await respond(i,"\n".join(result)[:1900] if result else "Aucun panneau personnalisé.")
-
-    @custom.command(name="publish",description="Publier le panneau personnalisé dans un salon")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def custom_publish(i:discord.Interaction,panel_id:int,channel:discord.TextChannel=None):
-        db=i.client.store;panel=db.custom_panel(i.guild_id,panel_id)
-        if not panel:return await respond(i,"Panneau introuvable.")
-        if not db.custom_items(panel_id):
-            return await respond(i,"Ajoute au moins un bouton avec /custom item.")
-        dest=channel or i.channel
-        cfg=db.settings(i.guild_id)
-        view=CustomPanel(db,panel,i.guild)
-        image=None if cfg["banner"] else discord.File(banner(cfg["name"]),filename="natix_banner.png")
-        await i.response.defer(ephemeral=True,thinking=True)
-        msg=await dest.send(view=view,file=image,allowed_mentions=discord.AllowedMentions.none())
-        i.client.add_view(view)
-        await i.followup.send("✅ Panneau publié : "+msg.jump_url,ephemeral=True)
-        await audit(i,"custom:published",str(panel_id))
-
-    @custom.command(name="remove",description="Désactiver un panneau et tous ses boutons")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def custom_remove(i:discord.Interaction,panel_id:int):
-        db=i.client.store
-        p=db.custom_panel(i.guild_id,panel_id)
-        if not p:return await respond(i,"Panneau introuvable.")
-        db.execute("UPDATE custom_panels SET active=0 WHERE guild=? AND id=?",(i.guild_id,panel_id))
-        await respond(i,"Panneau désactivé. Ses anciens boutons ne peuvent plus exécuter d'action.")
-        await audit(i,"custom:removed",str(panel_id))
-    @custom.command(name="edit",description="Modifier le titre et le texte d'un panneau")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def custom_edit(i:discord.Interaction,panel_id:int,title:str=None,description:str=None):
-        db=i.client.store
-        panel=db.custom_panel(i.guild_id,panel_id)
-        if not panel:return await respond(i,"Panneau introuvable.")
-        if title is None and description is None:
-            return await respond(i,"Indique un nouveau titre ou une description.")
-        db.execute("""UPDATE custom_panels SET title=?,description=?
-            WHERE id=? AND guild=?""",(title[:100] if title is not None else panel["title"],
-                       description[:1500] if description is not None else panel["description"],
-                       panel_id,i.guild_id))
-        await respond(i,"✅ Panneau modifié. Publie-le à nouveau pour afficher le nouveau style.")
-        await audit(i,"custom:edit",str(panel_id))
-
-    @custom.command(name="items",description="Afficher les identifiants et actions des boutons")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def custom_items(i:discord.Interaction,panel_id:int):
-        db=i.client.store
-        if not db.custom_panel(i.guild_id,panel_id):
-            return await respond(i,"Panneau introuvable.")
-        rows=db.custom_items(panel_id)
-        if not rows:return await respond(i,"Aucun bouton pour ce panneau.")
-        await respond(i,"\n".join("#"+str(row["id"])+" · "+
-            safe(row["label"],45)+" · "+row["action_kind"]+":"+row["action_value"] for row in rows)[:1900])
-
-    @custom.command(name="button_edit",description="Modifier un bouton latéral et sa destination")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def custom_button_edit(i:discord.Interaction,button_id:int,label:str=None,
-                                 description:str=None,target:str=None,emoji:str=None):
-        db=i.client.store
-        row=db.one("""SELECT ci.*,cp.guild,cp.active FROM custom_items ci
-            JOIN custom_panels cp ON ci.panel_id=cp.id WHERE ci.id=?""",(button_id,))
-        if not row or row["guild"]!=i.guild_id or not row["active"]:
-            return await respond(i,"Bouton introuvable.")
-        if target is not None:
-            allowed=TICKET_TYPES if row["action_kind"]=="ticket" else [key for key,_,_ in CATEGORIES]
-            if target not in allowed:
-                return await respond(i,"Destination invalide pour ce bouton.")
-        if emoji is not None and len(emoji)>8 and not re.fullmatch(r"nx_[a-z]{2,10}",emoji):
-            return await respond(i,"Emoji invalide. Exemple : 🎁 ou nx_shop.")
-        changes={"label":label[:70] if label is not None else row["label"],
-                 "description":description[:160] if description is not None else row["description"],
-                 "action_value":target if target is not None else row["action_value"],
-                 "emoji":emoji if emoji is not None else row["emoji"]}
-        db.execute("""UPDATE custom_items SET label=?,description=?,action_value=?,emoji=?
-            WHERE id=?""",(*changes.values(),button_id))
-        await respond(i,"✅ Bouton modifié. Republie le panneau pour afficher les changements.")
-        await audit(i,"custom:button_edit",str(button_id))
-
-    @custom.command(name="button_remove",description="Supprimer un bouton et désactiver son ancienne action")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def custom_button_remove(i:discord.Interaction,button_id:int):
-        db=i.client.store
-        row=db.one("""SELECT ci.id FROM custom_items ci
-            JOIN custom_panels cp ON ci.panel_id=cp.id
-            WHERE ci.id=? AND cp.guild=? AND cp.active=1""",(button_id,i.guild_id))
-        if not row:return await respond(i,"Bouton introuvable.")
-        db.execute("DELETE FROM custom_items WHERE id=?",(button_id,))
-        await respond(i,"✅ Bouton supprimé. Ses anciennes actions sont désactivées.")
-        await audit(i,"custom:button_remove",str(button_id))
-
-    @custom.command(name="preview",description="Prévisualiser un panneau personnalisé en privé")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def custom_preview(i:discord.Interaction,panel_id:int):
-        db=i.client.store
-        panel=db.custom_panel(i.guild_id,panel_id)
-        if not panel:return await respond(i,"Panneau introuvable.")
-        if not db.custom_items(panel_id):return await respond(i,"Ajoute d'abord un bouton.")
-        cfg=db.settings(i.guild_id)
-        file=None if cfg["banner"] else discord.File(banner(cfg["name"]),filename="natix_banner.png")
-        await i.response.send_message(view=CustomPanel(db,panel,i.guild),file=file,ephemeral=True)
-
-    tree.add_command(custom)
-
-    promotions=app_commands.Group(name="promoplan",description="Gérer le texte et les tarifs des promotions NATIX")
-    @promotions.command(name="set",description="Créer ou modifier une formule promotionnelle")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def promo_set(i:discord.Interaction,key:str,title:str,price:str,description:str):
-        if not re.fullmatch("[a-z0-9_-]{2,30}",key):
-            return await respond(i,"Identifiant : lettres minuscules, chiffres, - ou _, de 2 à 30 caractères.")
-        i.client.store.set_promo_plan(i.guild_id,key,title,price,description)
-        # Register any new custom plan button for persistent dispatch immediately.
-        guild=SimpleNamespace(id=i.guild_id,emojis=[])
-        i.client.add_view(Panel("promo",i.client.store,guild))
-        await respond(i,"✅ Plan **"+safe(title,40)+"** enregistré. Republie /promo.")
-        await audit(i,"promoplan:set",key)
-
-    @promotions.command(name="list",description="Voir les offres de promotion configurées")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def promo_list(i:discord.Interaction):
-        plans=i.client.store.promo_plans(i.guild_id)
-        await respond(i,"\n".join(k+" · "+safe(name)+" · "+safe(detail) for k,name,detail in plans)[:1900])
-
-    @promotions.command(name="disable",description="Désactiver une offre promotionnelle personnalisée")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def promo_disable(i:discord.Interaction,key:str):
-        r=i.client.store.execute("UPDATE promo_plans SET active=0 WHERE guild=? AND plan_key=?",(i.guild_id,key))
-        await respond(i,"Offre désactivée." if r.rowcount else "Offre personnalisée introuvable.")
-    tree.add_command(promotions)
-
-    @tree.command(name="help",description="Aide et liste des commandes NATIX")
-    async def help_cmd(i:discord.Interaction):
-        await respond(i,"**✦ NATIX · Commandes boutique**\n"
-            "Panneaux : /shop /support /trade /promo /rules /reviews /vouch /faq /partners /statistics /supporter\n"
-            "Design : /brand /banner /emojis /preview /panel\n"
-            "Catalogue : /product add|edit|remove|list|restock\n"
-            "Commandes : /order mine|list|status|details\n"
-            "Tickets : /ticket close|reopen|transcript|delete\n"
-            "Concours : /giveaway /giveaway_end /giveaway_reroll\n"
-            "Paramètres : /setup /settings /textconfig /supporter_config\n"
-            "Avis : /vouches queue|approve\nAnnonces : /announcement\n"
-            "-# Les actions administrateur sont protégées.")
+    tree.add_command(manage)
 
     @tree.error
-    async def on_error(i,error):
-        LOG.warning("Slash command failed: %s",error)
-        if isinstance(error,app_commands.MissingPermissions):
-            await respond(i,"Cette commande nécessite la permission Gérer le serveur.")
-        else:
-            await respond(i,"Commande indisponible. Vérifie les paramètres et les permissions.")
+    async def error(i,exc):
+        LOG.warning("NATIX command error: %s",exc)
+        try:
+            if isinstance(exc,app_commands.MissingPermissions):
+                await respond(i,"Commande réservée aux responsables du serveur.")
+            else:
+                await respond(i,"La commande n'a pas pu être exécutée. Vérifie la configuration.")
+        except discord.HTTPException:
+            LOG.exception("Could not send command error")
