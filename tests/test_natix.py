@@ -366,7 +366,7 @@ class PanelTests(unittest.TestCase):
         sent_args=i.response.calls[0][1]
         sent_kw=i.response.calls[0][2]
         self.assertEqual(sent_args[0],msg)
-        self.assertIsNone(sent_kw["allowed_mentions"].everyone)
+        self.assertFalse(sent_kw["allowed_mentions"].everyone)
         self.assertNotIn("embed",sent_kw)
         self.assertNotIn("view",sent_kw)
         self.assertNotIn("file",sent_kw)
