@@ -93,7 +93,7 @@ def paypal_contact_message(settings):
     """
     username=paypal_username(settings.get("paypal"))
     email=(settings.get("paypal_email") or "").strip()
-    if not re.fullmatch(r"[A-Za-z0-9._-]{1,80}",username):
+    if not username:
         return None
     if not re.fullmatch(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}",email):
         return None
