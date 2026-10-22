@@ -1,7 +1,7 @@
-name: NATIX smoke tests
+name: NATIX quality checks
 on:
   push:
-    branches: [main]
+    branches: [main, natix-marketplace-v2]
   workflow_dispatch:
 jobs:
   smoke:
@@ -12,22 +12,42 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install -r requirements.txt
-      - run: python -m py_compile main.py
-      - name: Build all interactive panels offline
+      - name: Compile all Python modules
+        run: python -m compileall -q main.py natix
+      - name: Discord UI + storage smoke tests
         run: |
           python - <<'PY'
-          import os
-          os.environ['DISCORD_TOKEN'] = 'test-token'
-          import discord
-          discord.Client.run=lambda self,token: None
-          import main
-          for name in main.PANELS:
-              panel=main.Panel(name)
-              assert panel.is_persistent(), name
-          assert main.TicketControls().is_persistent()
-          assert main.GiveView().is_persistent()
-          assert main.natix_banner('NATIX').read(8)==b'\x89PNG\r\n\x1a\n'
-          for k in ('gift','shop','support','star'):
-              assert len(main.emoji_image(k))>0
-          print('NATIX smoke tests passed')
+          from natix.db import Store
+          from natix.assets import CATEGORIES, PANELS, banner, emoji
+          from natix.panels import Panel, TicketControls, GiveawayPanel, CatalogView
+          from natix.bot import Natix
+          db=Store(":memory:")
+          db.configure(1,name="NATIX",staff=42,category=5)
+          assert db.settings(1)["staff"]==42
+          assert db.settings(2)["staff"]==0
+          pid=db.add_product(1,"nitro","Nitro Test","Example item","10 EUR",2)
+          assert db.product(1,pid)["stock"]==2
+          assert db.deduct_stock(1,pid,1)
+          assert db.product(1,pid)["stock"]==1
+          assert not db.deduct_stock(1,pid,2)
+          oid=db.create_order(1,100,db.product(1,pid),1,"test")
+          assert db.order(1,oid)["state"]=="pending"
+          assert db.order_state(1,oid,"accepted",999)
+          db.create_ticket(123,1,100,"order")
+          assert db.active_ticket(1,100,"order")["channel"]==123
+          assert len(CATEGORIES)==6
+          for name in PANELS:
+              view=Panel(name,db)
+              assert view.is_persistent(),name
+              assert len(view.children)>0,name
+          assert TicketControls().is_persistent()
+          assert GiveawayPanel().is_persistent()
+          assert CatalogView(db.products(1,"nitro"),"nitro").children
+          assert banner("NATIX").read(8)==b"\x89PNG\r\n\x1a\n"
+          for name in ("shop","gift","ticket","trade","support","star","shield"):
+              assert emoji(name).startswith(b"\x89PNG")
+          client=Natix(store=db)
+          assert len(client.tree.get_commands())>=20
+          assert not client.intents.message_content
+          print("NATIX tests passed: commands",len(client.tree.get_commands()),"panels",len(PANELS))
           PY
