@@ -277,6 +277,18 @@ async def review_action(i,key):
 async def dispatch(i,key):
     try:
         if not i.guild:return await respond(i,"Commande disponible dans un serveur uniquement.")
+        if key.startswith("custom:"):
+            try: item_id=int(key[7:])
+            except ValueError:return await respond(i,"Bouton invalide.")
+            r=store(i).one("""SELECT ci.*,cp.guild,cp.active FROM custom_items ci
+                JOIN custom_panels cp ON cp.id=ci.panel_id WHERE ci.id=?""",(item_id,))
+            if not r or not r["active"] or r["guild"]!=i.guild_id:
+                return await respond(i,"Ce panneau a été désactivé.")
+            if r["action_kind"]=="ticket":
+                return await create_ticket(i,r["action_value"])
+            if r["action_kind"]=="category":
+                return await show_category(i,r["action_value"])
+            return await respond(i,"Action non configurée.")
         if key.startswith("category:"):return await show_category(i,key.split(":",1)[1])
         if key.startswith("product:"):
             p=store(i).product(i.guild_id,int(key.split(":")[1]))
@@ -288,7 +300,7 @@ async def dispatch(i,key):
                 return await create_ticket(i,action)
             return await ticket_action(i,action)
         if key.startswith("plan:"):
-            plan=next((p for p in PLANS if p[0]==key[5:]),None)
+            plan=next((p for p in store(i).promo_plans(i.guild_id) if p[0]==key[5:]),None)
             if plan:return await create_ticket(i,"promo","Formule : "+plan[1]+" · "+plan[2])
         if key=="trade:history":
             rows=store(i).many("SELECT channel,state FROM tickets WHERE guild=? AND owner=? AND kind='trade' LIMIT 10",
