@@ -3,6 +3,7 @@ import logging
 import os
 import secrets
 import time
+from types import SimpleNamespace
 
 import discord
 from discord import app_commands
@@ -11,7 +12,7 @@ from discord.ext import tasks
 from .assets import PANELS, safe
 from .commands import register
 from .db import Store
-from .panels import Panel, TicketControls, GiveawayPanel, CustomPanel
+from .panels import Panel, TicketControls, GiveawayPanel, CustomPanel, CatalogView
 
 LOG=logging.getLogger("natix.bot")
 
@@ -35,6 +36,15 @@ class Natix(discord.Client):
         for record in self.store.custom_panels():
             if self.store.custom_items(record['id']):
                 self.add_view(CustomPanel(self.store,record))
+        # Register current catalog product IDs and customized promo buttons at startup.
+        # These must remain clickable after a Railway restart.
+        for row in self.store.many("SELECT DISTINCT guild, category FROM products WHERE active=1"):
+            products=self.store.products(row["guild"],row["category"],limit=8)
+            if products:
+                self.add_view(CatalogView(products,row["category"]))
+        for row in self.store.many("SELECT guild FROM config"):
+            guild=SimpleNamespace(id=row["guild"],emojis=[])
+            self.add_view(Panel("promo",self.store,guild))
         test_guild=os.getenv("DISCORD_GUILD_ID","").strip()
         if test_guild:
             obj=discord.Object(id=int(test_guild))
