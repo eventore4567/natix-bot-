@@ -13,6 +13,13 @@ def pack_containers(view, source, colour):
             box.add_item(child)
         view.add_item(box)
 
+def button_emoji(guild,value):
+    """Use a generated NATIX emoji name or an ordinary Unicode emoji."""
+    if not value:return "🔹"
+    if value.startswith("nx_"):
+        return server_emoji(guild,value[3:],"🔹")
+    return value
+
 def txt(text):
     return ui.TextDisplay(text)
 
@@ -229,6 +236,6 @@ class CustomPanel(ui.LayoutView):
             box.add_item(sep())
             box.add_item(ui.Section(
                 txt("**"+safe(item["label"],70)+"**\n"+safe(item["description"],160)),
-                accessory=ActionButton("Ouvrir","custom:"+str(item["id"]),item["emoji"] or "🔹")))
+                accessory=ActionButton("Ouvrir","custom:"+str(item["id"]),button_emoji(guild,item["emoji"]))))
         box.add_item(txt("-# NATIX · Panneau personnalisé"))
         pack_containers(self,box,accent)
