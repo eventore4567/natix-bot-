@@ -335,6 +335,26 @@ class PanelTests(unittest.TestCase):
         self.db.create_ticket(9, GUILD, 5, "support", 4, subject="> test")
         check_view(self, H.render_ticket(self.db, self.db.ticket(9)))
 
+    def test_paypal_panel_and_order_amount(self):
+        # /panel type=PayPal publishes into any explicitly chosen text channel.
+        from natix.config import PANEL_KINDS
+        self.assertEqual(PANEL_KINDS["paypal"], "PayPal / Paiement")
+        self.assertIn("paypal", V.PANEL_BUILDERS)
+        self.db.configure(GUILD, paypal="natixshop", paypal_email="paypal@natix.example",
+                          pay_note="Ajoute ton pseudo Discord dans la note.")
+        view, files=V.PANEL_BUILDERS["paypal"](self.db,GUILD)
+        payload=check_view(self,view)
+        text=json.dumps(payload,ensure_ascii=False)
+        self.assertIn("Paiements",text)
+        self.assertIn("https://paypal.me/natixshop",text)
+        self.assertIn("paypal@natix.example",text)
+        self.assertIn("montant exact",text)
+        self.assertNotIn("nx:pay:done",text)  # Never claim payment outside an order
+        self.assertEqual({f.filename for f in files},
+                         {"natix_shop.png","natix_logo.png"})
+        self.assertEqual(V.paypal_link(self.db.settings(GUILD),1998),
+                         "https://paypal.me/natixshop/19.98EUR")
+
     def test_command_tree(self):
         bot = Natix(store=self.db)
         names = {c.name for c in bot.tree.get_commands()}
