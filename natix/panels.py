@@ -78,12 +78,15 @@ class Panel(ui.LayoutView):
             frame.add_item(ui.ActionRow(
                 ActionButton("Boutique","nav:shop"),
                 ActionButton("Support","nav:support"),
-                ActionButton("Giveaways","nav:giveaways")
+                ActionButton("Giveaways","nav:giveaways"),
+                ActionButton("Échanges","nav:trade"),
+                ActionButton("Promos","nav:promo")
             ))
             frame.add_item(ui.ActionRow(
                 ActionButton("Statistiques","nav:stats"),
                 ActionButton("Réseaux","nav:social"),
-                ActionButton("Règlement","nav:terms")
+                ActionButton("Règlement","nav:terms"),
+                ActionButton("Mes commandes","nav:orders")
             ))
         elif kind=="giveaways":
             frame.add_item(txt("## NATIX  •  GIVEAWAYS\nConcours actifs de ce serveur."))
@@ -98,7 +101,8 @@ class Panel(ui.LayoutView):
                 frame.add_item(sep())
                 frame.add_item(ui.Section(
                     txt("**"+safe(item["prize"],100)+"**\nFin : <t:"+str(item["ends"])+":R>"),
-                    accessory=ActionButton("Participer","give:open:"+str(item["message"]))))
+                    accessory=ui.Button(label="Voir",style=discord.ButtonStyle.link,
+                     url="https://discord.com/channels/"+str(guild.id)+"/"+str(item["channel"])+"/"+str(item["message"]))))
                 shown+=1
                 if shown>=5:break
             if not shown:
