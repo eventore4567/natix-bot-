@@ -188,7 +188,7 @@ class GiveawayPanel(ui.LayoutView):
         self.add_item(box)
 
 class CatalogView(ui.LayoutView):
-    def __init__(self,products,category):
+    def __init__(self,products,category,page=0,total=None):
         super().__init__(timeout=None)
         box=ui.Container(accent_colour=discord.Colour(0xDDD1F2))
         label=next((name for key,name,_ in CATEGORIES if key==category),"Produits")
@@ -201,6 +201,16 @@ class CatalogView(ui.LayoutView):
             box.add_item(sep())
             box.add_item(ui.Section(txt("**"+safe(prod["name"],70)+"**\n"+
                  safe(prod["details"],120)+"\n"+price+" · "+stock),accessory=btn))
+        if total is not None:
+            pages=max(1,(total+5)//6)
+            box.add_item(sep())
+            box.add_item(txt("Page **"+str(page+1)+"/"+str(pages)+"** · "+str(total)+" produits"))
+            buttons=[]
+            if page>0:
+                buttons.append(ActionButton("Précédent","catalog:"+category+":"+str(page-1),"◀️"))
+            if page+1<pages:
+                buttons.append(ActionButton("Suivant","catalog:"+category+":"+str(page+1),"▶️"))
+            if buttons:box.add_item(ui.ActionRow(*buttons))
         pack_containers(self,box,discord.Colour(0xDDD1F2))
 
 
