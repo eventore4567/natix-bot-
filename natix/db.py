@@ -155,6 +155,56 @@ class Store:
             self.audit(guild,actor,"order:"+state,str(oid))
         return cur.rowcount>0
 
+
+    def attach_order_ticket(self,guild,order_id,channel):
+        self.execute(
+            "UPDATE orders SET channel=?,updated=? WHERE guild=? AND id=?",
+            (channel,int(time.time()),guild,order_id))
+
+    def transition_order(self,guild,order_id,target,actor):
+        """Advance orders atomically. Deduct stock exactly once on delivery.
+
+        Returns (success, status) and rolls back both order and stock changes on
+        invalid transitions, insufficient stock or database errors.
+        """
+        allowed={
+            "pending":{"accepted","cancelled"},
+            "accepted":{"processing","cancelled"},
+            "processing":{"delivered","cancelled"},
+            "delivered":set(),
+            "cancelled":set(),
+        }
+        if target not in {"pending","accepted","processing","delivered","cancelled"}:
+            return False,"Statut inconnu."
+        self.db.execute("BEGIN IMMEDIATE")
+        try:
+            order=self.one("SELECT * FROM orders WHERE guild=? AND id=?",
+                           (guild,order_id))
+            if not order:
+                self.db.execute("ROLLBACK")
+                return False,"Commande introuvable."
+            state=order["state"]
+            if state==target:
+                self.db.execute("ROLLBACK")
+                return True,"Commande déjà dans cet état, aucun nouveau débit de stock."
+            if target not in allowed.get(state,set()):
+                self.db.execute("ROLLBACK")
+                return False,"Transition impossible : "+state+" → "+target+"."
+            if target=="delivered":
+                if not self.deduct_stock(guild,order["product_id"],order["quantity"]):
+                    self.db.execute("ROLLBACK")
+                    return False,"Stock insuffisant ou produit indisponible : aucune livraison enregistrée."
+            now=int(time.time())
+            self.db.execute(
+                "UPDATE orders SET state=?,updated=? WHERE guild=? AND id=?",
+                (target,now,guild,order_id))
+            self.audit(guild,actor,"order:"+target,str(order_id))
+            self.db.execute("COMMIT")
+            return True,"Commande #"+str(order_id)+" : "+target
+        except Exception:
+            self.db.execute("ROLLBACK")
+            raise
+
     def deduct_stock(self,guild,pid,qty):
         # Atomic reduction. -1 means unlimited inventory.
         cur=self.execute("""UPDATE products SET stock=CASE WHEN stock=-1 THEN -1 ELSE stock-? END
