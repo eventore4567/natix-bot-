@@ -5,6 +5,7 @@ custom_id stable (« nx:… ») traité par le routeur de natix/handlers.py, ce 
 les rend fonctionnels même après un redémarrage du bot.
 """
 import discord
+import re
 from discord import ui
 
 from .config import BANNERS, ORDER_STATES, TICKET_KINDS
@@ -333,12 +334,24 @@ def pplme_panel(store, guild_id, contact):
     """
     settings = store.settings(guild_id)
     name = safe(settings["name"], 40)
-    view = view_of(container(
+    email = (settings.get("paypal_email") or "").strip()
+    # Discord bots cannot write a user's clipboard. A code block supplies
+    # Discord's own copy affordance, with a button to display it privately.
+    items = [
         *header("shop", settings, f"## {E('nx_dollar')} PayPal · {name}",
                 "Nos coordonnées PayPal officielles."),
         ui.Separator(),
         ui.TextDisplay("### Informations PayPal\n" + contact),
-    ))
+    ]
+    if re.fullmatch(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", email):
+        items.extend([
+            ui.Separator(),
+            ui.TextDisplay("**E-mail à copier :**\n```text\n" + email + "\n```"),
+            ui.ActionRow(ui.Button(
+                label="📋 Copier l'e-mail", custom_id="nx:ppl:copy",
+                style=discord.ButtonStyle.secondary)),
+        ])
+    view = view_of(container(*items))
     return view, files_for("shop", settings)
 
 

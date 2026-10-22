@@ -404,6 +404,18 @@ async def pay_done(i, parts):
                                                                   roles=[staff] if staff else False))
 
 
+async def ppl_copy(i, parts):
+    """Show a select-and-copy email, without pretending to control clipboard."""
+    email = (store_of(i).settings(i.guild_id).get("paypal_email") or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", email):
+        raise Oops("L'e-mail PayPal n'est pas configuré. Contacte le staff.")
+    await reply(
+        i,
+        "📋 **E-mail PayPal :**\n```text\n" + email
+        + "\n```\nAppuie sur l'icône de copie du bloc, ou sélectionne l'adresse."
+    )
+
+
 # ====================================================================== commandes (orders)
 async def ord_action(i, parts):
     require_staff(i)
@@ -936,6 +948,7 @@ ROUTES = [
     (r"^nx:buym:\d+$", buy_submit),
     (r"^nx:ord:\w+:\d+$", ord_action),
     (r"^nx:pay:done$", pay_done),
+    (r"^nx:ppl:copy$", ppl_copy),
     (r"^nx:sup:kind$", support_kind),
     (r"^nx:supm:\w+$", support_submit),
     (r"^nx:trade:start$", trade_start),

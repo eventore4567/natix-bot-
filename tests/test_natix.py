@@ -388,6 +388,9 @@ class PanelTests(unittest.TestCase):
         self.assertIn("natix_logo.png", serialized)
         self.assertIn("@natixshop", serialized)
         self.assertIn("natixshop9@gmail.com", serialized)
+        self.assertIn("nx:ppl:copy", serialized)
+        self.assertIn("Copier l'e-mail", serialized)
+        self.assertIs(H.find_route("nx:ppl:copy"), H.ppl_copy)
         self.assertNotIn("Comment payer", serialized)
         self.assertNotIn("J'ai payé", serialized)
         self.assertEqual({f.filename for f in assets}, {"natix_shop.png", "natix_logo.png"})
@@ -463,6 +466,19 @@ class FlowTests(unittest.TestCase):
         texts = [kw.get("content") for name, a, kw in i.response.calls if name == "send_message"]
         texts += [c.kwargs.get("content") for c in i.followup.send.call_args_list]
         return [t for t in texts if t]
+
+    def test_pplme_copy_email_response(self):
+        self.db.configure(GUILD, paypal_email="natixshop9@gmail.com")
+        i = self.route(self.buyer, "nx:ppl:copy")
+        self.assertEqual(i.response.calls[0][0], "send_message")
+        response = i.response.calls[0][2]
+        self.assertTrue(response["ephemeral"])
+        self.assertIn("natixshop9@gmail.com", response["content"])
+        self.assertIn("```text", response["content"])
+        self.assertFalse(response["allowed_mentions"].everyone)
+        self.db.configure(GUILD, paypal_email="")
+        invalid = self.route(self.buyer, "nx:ppl:copy")
+        self.assertIn("pas configuré", self.last_error(invalid)[0])
 
     def test_full_order_flow(self):
         i = self.route(self.buyer, "nx:shop:cat", values=["nitro"], message=SimpleNamespace(id=1))
