@@ -335,47 +335,63 @@ class PanelTests(unittest.TestCase):
         self.db.create_ticket(9, GUILD, 5, "support", 4, subject="> test")
         check_view(self, H.render_ticket(self.db, self.db.ticket(9)))
 
-    def test_pplme_is_plain_text_and_old_paypal_panel_is_preserved(self):
+    def test_pplme_has_natix_banner_and_short_contact_details(self):
         from natix.config import PANEL_KINDS
         from natix.commands import paypal_contact_message
         self.assertEqual(PANEL_KINDS["paypal"], "PayPal / Paiement")
         self.assertIn("paypal", V.PANEL_BUILDERS)
-        panel,files=V.PANEL_BUILDERS["paypal"](self.db,GUILD)
-        check_view(self,panel)
-        self.assertTrue(files)
+        existing, existing_files = V.PANEL_BUILDERS["paypal"](self.db, GUILD)
+        check_view(self, existing)
+        self.assertTrue(existing_files)
         self.assertIsNone(paypal_contact_message({}))
         self.assertIsNone(paypal_contact_message({"paypal": "natixshop"}))
         self.assertIsNone(paypal_contact_message(
-            {"paypal": "https://evil.example/username", "paypal_email":"example@gmail.com"}))
-        configured={"paypal":"@natixshop","paypal_email":"natixshop9@gmail.com"}
-        msg=paypal_contact_message(configured)
-        self.assertIn("@natixshop",msg)
-        self.assertIn("natixshop9@gmail.com",msg)
-        self.assertNotIn("Payer avec PayPal",msg)
-        self.assertNotIn("J'ai payé",msg)
-        same=paypal_contact_message({
-            "paypal":"https://paypal.me/natixshop", "paypal_email":"natixshop9@gmail.com"})
-        self.assertEqual(same,msg)
-        self.db.configure(GUILD,**configured)
-        bot=Natix(store=self.db)
-        command=bot.tree.get_command("pplme")
-        guild=FakeGuild()
-        channel=FakeChannel(5000, "paiements")
-        i=SimpleNamespace(client=bot,guild=guild,guild_id=GUILD,
-                          channel=channel,response=FakeResponse())
-        i.followup=SimpleNamespace(send=AsyncMock())
+            {"paypal": "https://evil.example/username", "paypal_email": "x@gmail.com"}))
+        configured = {"paypal": "@natixshop", "paypal_email": "natixshop9@gmail.com"}
+        self.db.configure(GUILD, **configured)
+        contact = paypal_contact_message(self.db.settings(GUILD))
+        self.assertIn("@natixshop", contact)
+        self.assertIn("natixshop9@gmail.com", contact)
+        self.assertNotIn("J'ai payé", contact)
+        panel, assets = V.pplme_panel(self.db, GUILD, contact)
+        payload = check_view(self, panel)
+        serialized = json.dumps(payload, ensure_ascii=False)
+        self.assertIn("natix_shop.png", serialized)
+        self.assertIn("natix_logo.png", serialized)
+        self.assertIn("@natixshop", serialized)
+        self.assertIn("natixshop9@gmail.com", serialized)
+        self.assertNotIn("Comment payer", serialized)
+        self.assertNotIn("J'ai payé", serialized)
+        self.assertEqual({f.filename for f in assets}, {"natix_shop.png", "natix_logo.png"})
+
+        bot = Natix(store=self.db)
+        command = bot.tree.get_command("pplme")
+        guild = FakeGuild()
+        channel = FakeChannel(5000, "paiements", private=False)
+        i = SimpleNamespace(client=bot, guild=guild, guild_id=GUILD,
+                            channel=channel, channel_id=channel.id, response=FakeResponse())
+        i.followup = SimpleNamespace(send=AsyncMock())
         run(command.callback(i))
-        self.assertEqual(i.response.calls[0][0],"send_message")
-        sent_args=i.response.calls[0][1]
-        sent_kw=i.response.calls[0][2]
-        self.assertEqual(sent_args[0],msg)
+        self.assertEqual(i.response.calls[0][0], "send_message")
+        sent_kw = i.response.calls[0][2]
+        check_view(self, sent_kw["view"])
+        self.assertEqual({f.filename for f in sent_kw["files"]},
+                         {"natix_shop.png", "natix_logo.png"})
         self.assertFalse(sent_kw["allowed_mentions"].everyone)
-        self.assertNotIn("embed",sent_kw)
-        self.assertNotIn("view",sent_kw)
-        self.assertNotIn("file",sent_kw)
-        # No accidental panel or message sent in the channel separately.
+        self.assertNotIn("content", sent_kw)
+        self.assertNotIn("embed", sent_kw)
         self.assertFalse(channel.sent)
-        self.assertEqual(V.paypal_link(self.db.settings(GUILD),1998),
+
+        elsewhere = FakeChannel(5001, "paypal-public", private=False)
+        i2 = SimpleNamespace(client=bot, guild=guild, guild_id=GUILD,
+                             channel=channel, channel_id=channel.id, response=FakeResponse())
+        i2.followup = SimpleNamespace(send=AsyncMock())
+        run(command.callback(i2, salon=elsewhere))
+        self.assertEqual(len(elsewhere.sent), 1)
+        self.assertIn("view", elsewhere.sent[0].kw)
+        self.assertIn("files", elsewhere.sent[0].kw)
+        self.assertEqual(i2.response.calls[0][0], "send_message")
+        self.assertEqual(V.paypal_link(self.db.settings(GUILD), 1998),
                          "https://paypal.me/natixshop/19.98EUR")
 
     def test_command_tree(self):
