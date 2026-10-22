@@ -179,6 +179,7 @@ class TicketControls(ui.LayoutView):
                                   ActionButton("Transcript","ticket:transcript","📜")))
         box.add_item(ui.ActionRow(ActionButton("Ajouter","ticket:add","➕"),
                                   ActionButton("Claim","ticket:claim","🛡️"),
+                                  ActionButton("Libérer","ticket:unclaim","↩️"),
                                   ActionButton("Statut","ticket:status","ℹ️")))
         self.add_item(box)
 
