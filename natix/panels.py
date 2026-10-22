@@ -65,13 +65,64 @@ class Panel(ui.LayoutView):
         if kind!="reviews":
             frame.add_item(ui.MediaGallery(discord.MediaGalleryItem(
                 media=s.get("banner") or "attachment://natix_banner.png")))
-        if kind=="shop":
-            frame.add_item(txt("## ✧ NATIX • PREMIUM SHOP\n"
+        if kind=="home":
+            frame.add_item(txt("## NATIX  •  ACCUEIL\n**Marketplace Discord premium**\n"
+                 "Choisis un service ci-dessous. Chaque bouton ouvre un vrai menu."))
+            frame.add_item(sep())
+            for key,name,desc in CATEGORIES[:5]:
+                frame.add_item(ui.Section(
+                    txt("**"+name+"**\n"+desc),
+                    accessory=ActionButton("Ouvrir","category:"+key)))
+                frame.add_item(sep())
+            frame.add_item(txt("**SERVICES & OUTILS**"))
+            frame.add_item(ui.ActionRow(
+                ActionButton("Boutique","nav:shop"),
+                ActionButton("Support","nav:support"),
+                ActionButton("Giveaways","nav:giveaways")
+            ))
+            frame.add_item(ui.ActionRow(
+                ActionButton("Statistiques","nav:stats"),
+                ActionButton("Réseaux","nav:social"),
+                ActionButton("Règlement","nav:terms")
+            ))
+        elif kind=="giveaways":
+            frame.add_item(txt("## NATIX  •  GIVEAWAYS\nConcours actifs de ce serveur."))
+            records=store.many(
+                "SELECT message,channel,prize,ends FROM giveaways WHERE closed=0 AND ends>? ORDER BY ends LIMIT 12",
+                (__import__("time").time(),)
+            )
+            shown=0
+            for item in records:
+                if not guild or not guild.get_channel(item["channel"]):
+                    continue
+                frame.add_item(sep())
+                frame.add_item(ui.Section(
+                    txt("**"+safe(item["prize"],100)+"**\nFin : <t:"+str(item["ends"])+":R>"),
+                    accessory=ActionButton("Participer","give:open:"+str(item["message"]))))
+                shown+=1
+                if shown>=5:break
+            if not shown:
+                frame.add_item(txt("Aucun giveaway en cours pour le moment."))
+        elif kind=="social":
+            frame.add_item(txt("## NATIX  •  RÉSEAUX\nRetrouve uniquement les liens officiels de la boutique."))
+            links=[("Discord",s.get("social_discord","")),
+                   ("TikTok",s.get("social_tiktok","")),
+                   ("Site web",s.get("social_site",""))]
+            available=[(name,url) for name,url in links if url]
+            if available:
+                for name,url in available:
+                    frame.add_item(sep())
+                    frame.add_item(txt("**"+name+"**\n"+safe(url,190)))
+            else:
+                frame.add_item(sep())
+                frame.add_item(txt("Liens à venir. Le staff peut les configurer avec /manage social."))
+        elif kind=="shop":
+            frame.add_item(txt("## NATIX  •  BOUTIQUE\n"
                  "Bienvenue dans notre boutique ! Parcours les collections, sélectionne un article et crée une commande privée."))
             for key,name,desc in CATEGORIES[:5]:
                 frame.add_item(sep())
                 frame.add_item(ui.Section(txt("**"+name+"**\n"+desc),
-                    accessory=ActionButton("Voir","category:"+key,server_emoji(guild,"shop","🛒"))))
+                    accessory=ActionButton("Ouvrir","category:"+key)))
             frame.add_item(sep())
             frame.add_item(ui.ActionRow(CategorySelect()))
             frame.add_item(txt("-# Les tarifs et stocks apparaissent dans les fiches produits."))
@@ -87,7 +138,7 @@ class Panel(ui.LayoutView):
             ]:
                 frame.add_item(sep())
                 frame.add_item(ui.Section(txt("**"+TICKET_TYPES[key]+"**\n"+desc),
-                    accessory=ActionButton("Ouvrir","ticket:"+key,server_emoji(guild,"ticket","🎫"))))
+                    accessory=ActionButton("Ouvrir","ticket:"+key)))
             frame.add_item(txt("-# Tickets privés • aucun membre mentionné automatiquement."))
         elif kind=="trade":
             frame.add_item(txt("## ⇄ NATIX EXCHANGE\n"
