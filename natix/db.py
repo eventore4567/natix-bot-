@@ -10,6 +10,7 @@ DEFAULT = {
     "color": "E6E4F0", "logs": 0, "vouch_channel": 0, "order_channel": 0,
     "supporter_role": 0, "status": ".gg/natix",
     "currency": "€", "welcome": False,
+    "social_discord":"", "social_tiktok":"", "social_site":"",
     "rules": (
         "Payez uniquement par les moyens officiels validés dans un ticket.\n"
         "Ne communiquez aucun mot de passe, token ou code de connexion.\n"
