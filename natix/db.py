@@ -66,6 +66,12 @@ class Store:
         ):
             self.db.execute(query)
 
+        # Existing NATIX databases predate staff ticket claiming.
+        # Apply this migration once without discarding historic ticket records.
+        columns={col["name"] for col in self.db.execute("PRAGMA table_info(tickets)")}
+        if "claimed_by" not in columns:
+            self.db.execute("ALTER TABLE tickets ADD COLUMN claimed_by INTEGER NOT NULL DEFAULT 0")
+
     def one(self, query, args=()):
         return self.db.execute(query, args).fetchone()
 
@@ -138,6 +144,27 @@ class Store:
 
     def ticket(self,channel):
         return self.one("SELECT * FROM tickets WHERE channel=?", (channel,))
+
+    def claim_ticket(self,channel,staff_id):
+        """Atomically assign an unclaimed, open ticket to exactly one staff member."""
+        cursor=self.execute(
+            """UPDATE tickets SET claimed_by=?
+               WHERE channel=? AND state='open'
+               AND (claimed_by=0 OR claimed_by=?)""",
+            (staff_id,channel,staff_id))
+        return cursor.rowcount>0
+
+    def release_ticket(self,channel,staff_id,override=False):
+        """Only the claimer or a server manager may release an assignment."""
+        if override:
+            cursor=self.execute(
+                "UPDATE tickets SET claimed_by=0 WHERE channel=? AND state='open' AND claimed_by!=0",
+                (channel,))
+        else:
+            cursor=self.execute(
+                "UPDATE tickets SET claimed_by=0 WHERE channel=? AND state='open' AND claimed_by=?",
+                (channel,staff_id))
+        return cursor.rowcount>0
 
     def state_ticket(self,channel,state):
         self.execute("UPDATE tickets SET state=? WHERE channel=?", (state,channel))
