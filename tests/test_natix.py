@@ -335,7 +335,35 @@ class PanelTests(unittest.TestCase):
         self.db.create_ticket(9, GUILD, 5, "support", 4, subject="> test")
         check_view(self, H.render_ticket(self.db, self.db.ticket(9)))
 
-    def test_pplme_has_natix_banner_and_short_contact_details(self):
+    def test_paypal_original_link_normalization(self):
+        from natix.paypal import paypal_username, paypal_base
+        from natix.commands import paypal_contact_message
+        source = "https://www.paypal.com/paypalme/NatixShop"
+        self.assertEqual(paypal_username(source), "NatixShop")
+        self.assertEqual(paypal_username("https://paypal.me/NatixShop"), "NatixShop")
+        self.assertEqual(paypal_username("@NatixShop"), "NatixShop")
+        self.assertEqual(paypal_base(source), "https://paypal.me/NatixShop")
+        self.assertIsNone(paypal_username("https://evil.example/paypalme/NatixShop"))
+        self.assertIsNone(paypal_username("https://paypal.com.evil.example/paypalme/NatixShop"))
+        self.assertIsNone(paypal_username("https://www.paypal.com/us/home"))
+        self.assertIsNone(paypal_username("http://paypal.me/NatixShop"))
+        self.assertIsNone(paypal_username("https://paypal.me/NatixShop/extra"))
+        contact = paypal_contact_message({"paypal":source,"paypal_email":"natixshop9@gmail.com"})
+        self.assertIn("@NatixShop", contact)
+        self.assertIn("natixshop9@gmail.com",contact)
+        self.assertEqual(
+            V.paypal_link({"paypal":source,"currency":"€"},1998),
+            "https://paypal.me/NatixShop/19.98EUR")
+        self.db.configure(GUILD,paypal=source,paypal_email="natixshop9@gmail.com")
+        short,attachments=V.pplme_panel(self.db,GUILD,contact)
+        payload=json.dumps(check_view(self,short),ensure_ascii=False)
+        self.assertIn("@NatixShop",payload)
+        self.assertIn("natixshop9@gmail.com",payload)
+        full,assets=V.paypal_panel(self.db,GUILD)
+        full_data=json.dumps(check_view(self,full),ensure_ascii=False)
+        self.assertIn("https://paypal.me/NatixShop",full_data)
+
+    def test_pplme_has_natix_banner_and_short_contact_details(self):    def test_pplme_has_natix_banner_and_short_contact_details(self):
         from natix.config import PANEL_KINDS
         from natix.commands import paypal_contact_message
         self.assertEqual(PANEL_KINDS["paypal"], "PayPal / Paiement")
@@ -599,6 +627,25 @@ class FlowTests(unittest.TestCase):
                                           pay_note="Pseudo en note", pay_other="LTC : ltc1qtest"))
         s = self.db.settings(GUILD)
         self.assertEqual((s["paypal"], s["paypal_email"]), ("natixshop", "pay@natix.gg"))
+        # The URL shown in the user's setup screenshot is accepted and saved
+        # as a PayPal.me username, without losing the email or payment note.
+        i=self.route(self.admin,"nx:cfgm:payment",modal=True,
+                     message=SimpleNamespace(id=1),components=text_fields(
+                         paypal="https://www.paypal.com/paypalme/NatixShop",
+                         paypal_email="natixshop9@gmail.com",
+                         pay_note="Informations affichées au client",
+                         pay_other="Only ppl"))
+        self.assertEqual(self.last_error(i),[])
+        self.assertTrue(i.followup.send.called)
+        saved=self.db.settings(GUILD)
+        self.assertEqual(saved["paypal"],"NatixShop")
+        self.assertEqual(saved["paypal_email"],"natixshop9@gmail.com")
+        self.assertEqual(saved["pay_note"],"Informations affichées au client")
+        self.assertEqual(V.paypal_link(saved,1998),
+                         "https://paypal.me/NatixShop/19.98EUR")
+        # Restore the original test profile for the order-flow assertions.
+        self.db.configure(GUILD,paypal="natixshop",paypal_email="pay@natix.gg",
+                          pay_note="Pseudo en note",pay_other="LTC : ltc1qtest")
         check_view(self, V.setup_view(self.db, self.guild))
         # Commande → ticket avec bouton PayPal au bon montant
         self.route(self.buyer, f"nx:buym:{self.pid}", modal=True, components=text_fields(qty="2"))
