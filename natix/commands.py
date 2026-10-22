@@ -1,13 +1,16 @@
-"""Les 5 commandes slash de NATIX. Tout le reste passe par les panneaux.
+"""Les 6 commandes slash de NATIX. Tout le reste passe par les panneaux.
 
 /setup     tableau de bord de configuration (boutons + formulaires)
 /panel     publier un panneau (accueil, boutique, échanges, promos, support, avis, règlement, réseaux)
 /product   ajouter, modifier, réapprovisionner, retirer, lister les produits
 /giveaway  lancer, terminer, relancer un tirage
 /orders    suivre les commandes clients
+/pplme     afficher en texte le pseudo et l’email PayPal configurés
 """
 import logging
 import time
+import re
+from urllib.parse import urlsplit
 
 import discord
 from discord import app_commands
@@ -82,6 +85,27 @@ async def announce_restock(i, product, added):
         LOG.warning("Annonce de restock impossible dans %s", channel.id)
 
 
+def paypal_contact_message(settings):
+    """Render just the configured PayPal contact, never an order-payment panel.
+
+    Returns None while the owner has not set both the username and email.
+    """
+    raw=(settings.get("paypal") or "").strip()
+    if raw.startswith("https://"):
+        parsed=urlsplit(raw)
+        if parsed.hostname not in ("paypal.me","www.paypal.me"):
+            raw=""
+        else:
+            raw=(parsed.path.strip("/").split("/") or [""])[0]
+    username=raw.lstrip("@")
+    email=(settings.get("paypal_email") or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9._-]{1,80}",username):
+        return None
+    if not re.fullmatch(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}",email):
+        return None
+    return "**Mon user PayPal :** @"+safe(username,80)+"\n**Mon mail PayPal :** "+safe(email,160)
+
+
 def register(tree: app_commands.CommandTree):
     # -------------------------------------------------------------- /setup
     @tree.command(name="setup", description="Configurer NATIX (salons, staff, textes, catégories, promotions)")
@@ -92,7 +116,27 @@ def register(tree: app_commands.CommandTree):
         await i.response.send_message(view=V.setup_view(i.client.store, i.guild), ephemeral=True,
                                       allowed_mentions=NO_PINGS)
 
-    # -------------------------------------------------------------- /panel
+    # -------------------------------------------------------------- /pplme
+    @tree.command(name="pplme", description="Afficher le pseudo et l'email PayPal NATIX")
+    @app_commands.guild_only()
+    @staff_only()
+    @app_commands.describe(salon="Facultatif : publier dans un autre salon")
+    async def pplme(i: discord.Interaction, salon: discord.TextChannel = None):
+        message=paypal_contact_message(i.client.store.settings(i.guild_id))
+        if not message:
+            return await reply(i,"Configure ton pseudo PayPal et ton email dans /setup → Paiements.")
+        destination=salon or i.channel
+        if destination==i.channel:
+            # Intentionally plain public text: no banner, embed, or panel.
+            return await i.response.send_message(message,allowed_mentions=NO_PINGS)
+        perms=destination.permissions_for(i.guild.me)
+        if not (perms.view_channel and perms.send_messages):
+            return await reply(i,"NATIX ne peut pas envoyer de message dans ce salon.")
+        await destination.send(message,allowed_mentions=NO_PINGS)
+        await reply(i,f"Informations PayPal publiées dans {destination.mention}.")
+
+
+    # -------------------------------------------------------------- /panel    # -------------------------------------------------------------- /panel
     @tree.command(name="panel", description="Publier un panneau NATIX dans un salon")
     @app_commands.guild_only()
     @app_commands.default_permissions(manage_guild=True)
