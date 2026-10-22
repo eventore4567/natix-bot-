@@ -40,12 +40,25 @@ jobs:
               view=Panel(name,db)
               assert view.is_persistent(),name
               assert len(view.children)>0,name
+              assert all(len(box.children)<=10 for box in view.children),name
+              assert sum(len(box.children) for box in view.children)<=30,name
           assert TicketControls().is_persistent()
           assert GiveawayPanel().is_persistent()
-          assert CatalogView(db.products(1,"nitro"),"nitro").children
+          catalog=CatalogView(db.products(1,"nitro"),"nitro")
+          assert catalog.is_persistent()
+          assert catalog.children
+          assert all(len(box.children)<=10 for box in catalog.children)
           assert banner("NATIX").read(8)==b"\x89PNG\r\n\x1a\n"
           for name in ("shop","gift","ticket","trade","support","star","shield"):
               assert emoji(name).startswith(b"\x89PNG")
+          pid2=db.create_custom_panel(1,"CUSTOM","My panel")
+          for n in range(6):
+              db.create_custom_item(pid2,"Item "+str(n),"Description","ticket","support","🎟️")
+          from natix.panels import CustomPanel
+          custom=CustomPanel(db,db.custom_panel(1,pid2))
+          assert custom.is_persistent()
+          assert all(len(box.children)<=10 for box in custom.children)
+          assert sum(len(box.children) for box in custom.children)<=30
           client=Natix(store=db)
           assert len(client.tree.get_commands())>=20
           assert not client.intents.message_content
