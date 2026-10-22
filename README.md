@@ -1,16 +1,51 @@
-# NATIX Shop Discord Bot
+# NATIX — Premium Discord Marketplace
 
-This replaces the earlier Natix AI bot and legacy anti-bot folder with a Discord shop using Components V2.
+NATIX is a shop-only Discord bot. This repository has been rewritten into separate Python modules instead of the former Natix AI bot and old anti-bot code.
 
-## Features
-Persistent panels with large NATIX banners, side buttons, selects, tickets, catalog with prices and stock, promo plans, giveaways, reviews, original emojis and editable terms.
+## Architecture
+- main.py: Railway entrypoint.
+- natix/bot.py: Discord client, persistent views, command sync, scheduled giveaways.
+- natix/db.py: SQLite inventory, tickets, orders, reviews and per-server settings.
+- natix/assets.py: original monochrome NATIX banners and custom icons generated with Pillow.
+- natix/panels.py: separate native Discord Components V2 panels with accessory buttons on the right.
+- natix/services.py: ticket handling, orders, giveaways, transcripts and modals.
+- natix/commands.py: shop and administrative slash commands.
+- .github/workflows/smoke.yml: automated checks.
 
-## Commands
-`/setup`, `/brand`, `/emojis`, `/product add`, `/product remove`, `/product list`, `/restock`, `/shop`, `/support`, `/trade`, `/promo`, `/rules`, `/terms`, `/supporter`, `/supporter_config`, `/reviews`, `/giveaway`, `/preview`, `/ticket_delete`, `/help`.
+## Separate premium panels
+/shop, /support, /trade, /promo, /rules, /supporter, /reviews, /vouch, /faq, /partners, /statistics.
 
-## Railway
-`DISCORD_TOKEN` required; optional `DISCORD_GUILD_ID` for instant server-scoped commands, `NATIX_DB_PATH` defaults to `/data/natix.sqlite` when a `/data` volume is mounted. Railway start: `python main.py`.
+Use /panel to choose where to publish a panel, or /preview to test one privately.
 
-Enable Server Members Intent and Presence Intent for the supporter check. The bot needs Manage Channels, Manage Roles, View Channels, Send Messages, Read Message History, Use Application Commands, and Manage Expressions for custom emojis. Configure `/setup` first. A persistent Railway volume is essential for durable SQLite data.
+## Product and order administration
+/product add, /product edit, /product remove, /product restock, /product list.
+/order mine, /order details, /order list, /order status.
+/ticket close, /ticket reopen, /ticket transcript, /ticket delete.
 
-Discord Components V2 requires discord.py >=2.6; it cannot mix classic embed/content with LayoutView. Promo prices and schedules are examples only, and **no automatic payment, crypto withdrawal, voucher payout or mass ping is performed**.
+## Customization
+/setup, /brand, /banner, /emojis, /textconfig, /settings, /supporter_config, /announcement.
+
+## Promotions and giveaways
+/promo publishes example plans requiring staff approval. No automated mass mentions.
+/giveaway starts a giveaway; /giveaway_end closes it; /giveaway_reroll picks another entrant.
+/vouches queue and /vouches approve moderate actual written customer testimonials.
+
+## Railway deployment
+Start command is python main.py (see railway.json).
+Environment variables:
+- DISCORD_TOKEN: required bot token.
+- DISCORD_GUILD_ID: optional single-guild slash sync for fast testing.
+- NATIX_DB_PATH: defaults to /data/natix.sqlite when the /data directory is present.
+- NATIX_MEMBERS_INTENT=1: optional, enable Server Members Intent in Discord Portal too.
+- NATIX_PRESENCES_INTENT=1: optional, enable Presence Intent in Discord Portal too.
+
+Attach a persistent Railway volume at /data to preserve database across builds/redeploys.
+Give the bot permission to manage ticket channels, send messages, read history, assign supporter roles, and manage expressions for custom emoji creation. Configure /setup before opening tickets.
+
+## Important limitations
+- Prices in promotion panels are example placeholders, not real payment products. Payments and product delivery require staff validation in tickets.
+- No automatic payments, crypto transfers, voucher payments or mass pings.
+- The custom supporter status check is available only with authorized Presence Intent; time-based supporter credit/rewards are not implemented.
+- Transcripts export all messages still available in the Discord channel history, with attachment URLs; already deleted messages cannot be reconstructed.
+- Original emoji pack is generated with /emojis; failures are reported if permissions or server emoji slots are insufficient.
+- Passing automated tests does not replace acceptance testing against a live Discord server.
