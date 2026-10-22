@@ -407,12 +407,12 @@ async def pay_done(i, parts):
 async def ppl_copy(i, parts):
     """Show a select-and-copy email, without pretending to control clipboard."""
     email = (store_of(i).settings(i.guild_id).get("paypal_email") or "").strip()
-    if not re.fullmatch(r"[^@\\s`]+@[^@\\s`]+\\.[^@\\s`]+", email):
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
         raise Oops("L'e-mail PayPal n'est pas configuré. Contacte le staff.")
     await reply(
         i,
-        "📋 **E-mail PayPal :**\\n```text\\n" + email
-        + "\\n```\\nAppuie sur l'icône de copie du bloc, ou sélectionne l'adresse."
+        "📋 **E-mail PayPal :**\n```text\n" + email
+        + "\n```\nAppuie sur l'icône de copie du bloc, ou sélectionne l'adresse."
     )
 
 
