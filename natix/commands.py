@@ -476,6 +476,79 @@ def register(tree):
         db.execute("UPDATE custom_panels SET active=0 WHERE guild=? AND id=?",(i.guild_id,panel_id))
         await respond(i,"Panneau désactivé. Ses anciens boutons ne peuvent plus exécuter d'action.")
         await audit(i,"custom:removed",str(panel_id))
+    @custom.command(name="edit",description="Modifier le titre et le texte d'un panneau")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def custom_edit(i:discord.Interaction,panel_id:int,title:str=None,description:str=None):
+        db=i.client.store
+        panel=db.custom_panel(i.guild_id,panel_id)
+        if not panel:return await respond(i,"Panneau introuvable.")
+        if title is None and description is None:
+            return await respond(i,"Indique un nouveau titre ou une description.")
+        db.execute("""UPDATE custom_panels SET title=?,description=?
+            WHERE id=? AND guild=?""",(title[:100] if title is not None else panel["title"],
+                       description[:1500] if description is not None else panel["description"],
+                       panel_id,i.guild_id))
+        await respond(i,"✅ Panneau modifié. Publie-le à nouveau pour afficher le nouveau style.")
+        await audit(i,"custom:edit",str(panel_id))
+
+    @custom.command(name="items",description="Afficher les identifiants et actions des boutons")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def custom_items(i:discord.Interaction,panel_id:int):
+        db=i.client.store
+        if not db.custom_panel(i.guild_id,panel_id):
+            return await respond(i,"Panneau introuvable.")
+        rows=db.custom_items(panel_id)
+        if not rows:return await respond(i,"Aucun bouton pour ce panneau.")
+        await respond(i,"\n".join("#"+str(row["id"])+" · "+
+            safe(row["label"],45)+" · "+row["action_kind"]+":"+row["action_value"] for row in rows)[:1900])
+
+    @custom.command(name="button_edit",description="Modifier un bouton latéral et sa destination")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def custom_button_edit(i:discord.Interaction,button_id:int,label:str=None,
+                                 description:str=None,target:str=None,emoji:str=None):
+        db=i.client.store
+        row=db.one("""SELECT ci.*,cp.guild,cp.active FROM custom_items ci
+            JOIN custom_panels cp ON ci.panel_id=cp.id WHERE ci.id=?""",(button_id,))
+        if not row or row["guild"]!=i.guild_id or not row["active"]:
+            return await respond(i,"Bouton introuvable.")
+        if target is not None:
+            allowed=TICKET_TYPES if row["action_kind"]=="ticket" else [key for key,_,_ in CATEGORIES]
+            if target not in allowed:
+                return await respond(i,"Destination invalide pour ce bouton.")
+        if emoji is not None and len(emoji)>8:
+            return await respond(i,"Utilise un emoji court (ex. 🎁).")
+        changes={"label":label[:70] if label is not None else row["label"],
+                 "description":description[:160] if description is not None else row["description"],
+                 "action_value":target if target is not None else row["action_value"],
+                 "emoji":emoji if emoji is not None else row["emoji"]}
+        db.execute("""UPDATE custom_items SET label=?,description=?,action_value=?,emoji=?
+            WHERE id=?""",(*changes.values(),button_id))
+        await respond(i,"✅ Bouton modifié. Republie le panneau pour afficher les changements.")
+        await audit(i,"custom:button_edit",str(button_id))
+
+    @custom.command(name="button_remove",description="Supprimer un bouton et désactiver son ancienne action")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def custom_button_remove(i:discord.Interaction,button_id:int):
+        db=i.client.store
+        row=db.one("""SELECT ci.id FROM custom_items ci
+            JOIN custom_panels cp ON ci.panel_id=cp.id
+            WHERE ci.id=? AND cp.guild=? AND cp.active=1""",(button_id,i.guild_id))
+        if not row:return await respond(i,"Bouton introuvable.")
+        db.execute("DELETE FROM custom_items WHERE id=?",(button_id,))
+        await respond(i,"✅ Bouton supprimé. Ses anciennes actions sont désactivées.")
+        await audit(i,"custom:button_remove",str(button_id))
+
+    @custom.command(name="preview",description="Prévisualiser un panneau personnalisé en privé")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def custom_preview(i:discord.Interaction,panel_id:int):
+        db=i.client.store
+        panel=db.custom_panel(i.guild_id,panel_id)
+        if not panel:return await respond(i,"Panneau introuvable.")
+        if not db.custom_items(panel_id):return await respond(i,"Ajoute d'abord un bouton.")
+        cfg=db.settings(i.guild_id)
+        file=None if cfg["banner"] else discord.File(banner(cfg["name"]),filename="natix_banner.png")
+        await i.response.send_message(view=CustomPanel(db,panel,i.guild),file=file,ephemeral=True)
+
     tree.add_command(custom)
 
     promotions=app_commands.Group(name="promoplan",description="Gérer le texte et les tarifs des promotions NATIX")
