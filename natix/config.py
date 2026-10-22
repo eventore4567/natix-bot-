@@ -94,5 +94,4 @@ PANEL_KINDS = {
     "reviews": "Avis clients (Are we legit?)",
     "rules": "Règlement",
     "social": "Réseaux",
-    "paypal": "PayPal / Paiement",
 }
