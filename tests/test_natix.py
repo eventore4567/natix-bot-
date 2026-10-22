@@ -373,7 +373,7 @@ class PanelTests(unittest.TestCase):
         # No accidental panel or message sent in the channel separately.
         self.assertFalse(channel.sent)
         self.assertEqual(V.paypal_link(self.db.settings(GUILD),1998),
-                         "https://paypal.me/@natixshop/19.98EUR")
+                         "https://paypal.me/natixshop/19.98EUR")
 
     def test_command_tree(self):
         bot = Natix(store=self.db)
