@@ -104,33 +104,94 @@ async def add_ticket_member(i,member):
     await audit(i,"ticket:add",str(member.id)+" in "+str(i.channel_id))
     await respond(i,"Membre ajouté aux permissions du ticket.")
 
+async def transcript_parts(channel):
+    """Export the complete accessible channel history in <=7 MB UTF-8 parts.
+
+    Content, embeds and attachment URLs are included. Discord does not provide
+    deleted messages or past versions of edited messages through history.
+    """
+    parts=[]
+    current=[]
+    size=0
+    limit=7_000_000
+    async for message in channel.history(limit=None,oldest_first=True):
+        attachments="\n".join(
+            "Attachment: "+str(a.filename)+" | "+str(a.url)
+            for a in message.attachments
+        )
+        embeds="\n".join(
+            "Embed: "+str(e.title or "")+" | "+str(e.description or "")
+            for e in message.embeds
+        )
+        content=message.content or "[no plaintext]"
+        entry=(message.created_at.isoformat()+" | "
+               +str(message.author.id)+" @"+str(message.author)
+               +"\n"+content+"\n"+embeds+"\n"+attachments+"\n\n").encode(
+                    "utf-8",errors="replace")
+        for i in range(0,len(entry),limit):
+            chunk=entry[i:i+limit]
+            if current and size+len(chunk)>limit:
+                parts.append(b"".join(current))
+                current=[];size=0
+            current.append(chunk);size+=len(chunk)
+    if current:
+        parts.append(b"".join(current))
+    if not parts:
+        parts=[b"No accessible messages in this channel."]
+    return parts
+
+
+async def archive_ticket(i):
+    """Archive to a configured staff-only log channel before ticket deletion.
+
+    Refuse deletion if the archive cannot be safely delivered in full.
+    """
+    db=store(i)
+    settings=db.settings(i.guild_id)
+    logs=i.guild.get_channel(settings["logs"]) if settings["logs"] else None
+    if not isinstance(logs,discord.TextChannel):
+        return False,"Configure d'abord un salon de logs avec /setup pour archiver avant suppression."
+    if logs.id==i.channel_id:
+        return False,"Le salon des logs doit être différent du salon ticket."
+    guild_me=i.guild.me
+    if not guild_me:
+        return False,"Le bot n'est pas accessible dans ce serveur."
+    permissions=logs.permissions_for(guild_me)
+    if not (permissions.view_channel and permissions.send_messages and permissions.attach_files):
+        return False,"Permissions insuffisantes pour envoyer les transcripts dans le salon de logs."
+    parts=await transcript_parts(i.channel)
+    try:
+        for number,part in enumerate(parts,1):
+            info=("📜 **Archive NATIX** — ticket : "+str(i.channel_id)
+                  +" · "+str(number)+"/"+str(len(parts))
+                  +" · staff : <@"+str(i.user.id)+">")
+            await logs.send(
+                info,file=discord.File(io.BytesIO(part),
+                filename=f"natix-ticket-{i.channel_id}-{number}.txt"),
+                allowed_mentions=discord.AllowedMentions.none()
+            )
+    except (discord.Forbidden,discord.HTTPException):
+        LOG.exception("Could not archive ticket %s",i.channel_id)
+        return False,"L'export a échoué. Le ticket est conservé pour éviter toute perte."
+    return True,str(len(parts))+" fichier(s) enregistré(s) dans "+logs.mention
+
+
 async def export_transcript(i):
     if not is_staff(i):
         return await respond(i,"Le téléchargement du transcript est réservé au staff.")
     if not store(i).ticket(i.channel_id):
         return await respond(i,"Ticket NATIX introuvable.")
     await i.response.defer(thinking=True,ephemeral=True)
-    # Stream all accessible history instead of imposing a 1000-message limit.
-    parts=[]; lines=[]; size=0
-    async for message in i.channel.history(limit=None,oldest_first=True):
-        attachments=", ".join(f"{a.filename}: {a.url}" for a in message.attachments)
-        embeds=" | ".join((e.title or "")+" "+(e.description or "") for e in message.embeds)
-        body=(message.content or "")+"\n"+embeds+"\n"+attachments
-        record=(message.created_at.isoformat()+" UTC | "+
-                str(message.author.id)+" @"+str(message.author)+"\n"+body+"\n\n").encode("utf-8",errors="replace")
-        if len(record)>7_000_000:
-            record=record[:7_000_000]+b"\n[Message exceeds safe attachment size]\n"
-        if size+len(record)>7_000_000 and lines:
-            parts.append(b"".join(lines));lines=[];size=0
-        lines.append(record);size+=len(record)
-    if lines:parts.append(b"".join(lines))
-    if not parts:parts=[b"No messages in accessible history."]
-    for index,data in enumerate(parts,1):
-        file=discord.File(io.BytesIO(data),filename=f"natix-{i.channel_id}-part-{index}.txt")
+    parts=await transcript_parts(i.channel)
+    for number,data in enumerate(parts,1):
         await i.followup.send(
-            f"📜 Transcript {index}/{len(parts)} — historique disponible sur Discord",
-            file=file,ephemeral=True)
+            "📜 Transcript "+str(number)+"/"+str(len(parts))+" — historique accessible sur Discord",
+            file=discord.File(io.BytesIO(data),
+                filename=f"natix-{i.channel_id}-part-{number}.txt"),
+            ephemeral=True
+        )
     await audit(i,"ticket:transcript",str(i.channel_id)+" parts="+str(len(parts)))
+
 
 class BuyModal(ui.Modal,title="✦ Commander sur NATIX"):
     quantity=ui.TextInput(label="Quantité",placeholder="1",default="1",max_length=4)
@@ -220,12 +281,29 @@ async def ticket_action(i,key):
         view=ui.View(timeout=180);view.add_item(MemberSelect())
         return await i.response.send_message("Ajoute un membre :",view=view,ephemeral=True)
     if key=="status":
-        return await respond(i,"Ticket **"+row["state"]+"** · Type : "+row["kind"]+" · Propriétaire : <@"+str(row["owner"])+">")
+        claimer=("<@"+str(row["claimed_by"])+">" if row["claimed_by"] else "Non attribué")
+        return await respond(i,"Ticket **"+row["state"]+"** · Type : "+row["kind"]+
+                             " · Propriétaire : <@"+str(row["owner"])+"> · Responsable : "+claimer)
     if key=="claim":
-        if not is_staff(i):return await respond(i,"Réservé au staff.")
-        await audit(i,"ticket:claimed",str(i.channel_id))
-        return await i.response.send_message("🛡️ Un membre du staff a pris en charge ce ticket.",
-                                             allowed_mentions=discord.AllowedMentions.none())
+        if not is_staff(i):
+            return await respond(i,"Réservé au staff.")
+        if row["state"]!="open":
+            return await respond(i,"Ce ticket est fermé.")
+        if not db.claim_ticket(i.channel_id,i.user.id):
+            return await respond(i,"Ce ticket est déjà pris en charge par <@"+
+                                 str(row["claimed_by"])+">.")
+        await audit(i,"ticket:claimed",str(i.channel_id)+" by "+str(i.user.id))
+        return await i.response.send_message(
+            "🛡️ Ticket pris en charge par <@"+str(i.user.id)+">.",
+            allowed_mentions=discord.AllowedMentions.none())
+    if key=="unclaim":
+        if not is_staff(i):
+            return await respond(i,"Réservé au staff.")
+        can_override=i.user.guild_permissions.manage_guild
+        if not db.release_ticket(i.channel_id,i.user.id,override=can_override):
+            return await respond(i,"Ce ticket n'est pas attribué à toi, ou est déjà libéré.")
+        await audit(i,"ticket:unclaimed",str(i.channel_id))
+        return await i.response.send_message("🛡️ Ticket libéré.")
     if key=="close":
         if not is_staff(i) and row["owner"]!=i.user.id:
             return await respond(i,"Tu ne peux pas fermer ce ticket.")
