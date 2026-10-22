@@ -15,9 +15,8 @@ CATEGORIES=[
     ("other","📁 Autres","Autres offres et services"),
 ]
 PANELS={
-    "shop":"Boutique","support":"Tickets","trade":"Échanges","promo":"Promotions",
-    "terms":"Conditions","supporter":"Supporters","reviews":"Avis","faq":"FAQ",
-    "partners":"Partenaires","stats":"Statistiques","vouch":"Témoignages",
+    "home":"Accueil","shop":"Boutique","support":"Support","giveaways":"Giveaways",
+    "stats":"Statistiques","social":"Réseaux","terms":"Règlement",
 }
 TICKET_TYPES={
     "support":"Support","seller":"Candidature vendeur","staff":"Candidature staff",
@@ -30,46 +29,71 @@ PLANS=[("basic","Basic","10€ · 7 jours"),("standard","Standard","20€ · 14 
 def safe(text,limit=120):
     return discord.utils.escape_mentions(discord.utils.escape_markdown(str(text)))[:limit]
 
-def font(size):
-    for file in (
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-        "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
-        "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
-    ):
-        try:return ImageFont.truetype(file,size)
-        except OSError:pass
-    return ImageFont.load_default()
+def banner(title="NATIX",subtitle="PREMIUM DISCORD SHOP"):
+    """High contrast 1400×420 banner, vector-drawn to work without system fonts.
 
-def banner(title="NATIX",subtitle="PREMIUM DISCORD MARKETPLACE"):
-    im=Image.new("RGB",(1400,420),"#06070B")
+    The previous banner relied on external fonts. Railway's default fallback
+    reduced NATIX to 10-pixel letters. This logo uses fixed geometry instead.
+    """
+    W,H=1400,420
+    im=Image.new("RGB",(W,H),"#08090D")
     d=ImageDraw.Draw(im)
-    r=random.Random(20261022)
-    # Asymmetric layered silver wings framing the central NATIX wordmark.
-    for side in (0,1):
-        for k in range(15):
-            x=-90+k*25 if side==0 else 1490-k*25
-            factor=1 if side==0 else -1
-            y=55+k*22
-            p=[(x,y),(x+factor*(190+r.randrange(70)),y-80),
-               (x+factor*(280+r.randrange(130)),y+9),
-               (x+factor*(130+r.randrange(110)),y+56)]
-            value=r.choice([52,87,131,189,233,245])
-            d.polygon(p,fill=(value,value,value+min(8,255-value)))
-    for i in range(42):
-        x=r.randint(0,1400); y=r.randint(0,420)
-        d.line((x,y,x+r.randint(-160,160),y+r.randint(-45,45)),
-               fill=r.choice(["#1D1D29","#333340","#555561"]),width=r.randint(1,3))
-    label=re.sub(r"[^A-Za-z0-9 -]","",title).upper()[:15] or "NATIX"
-    f=font(165 if len(label)<9 else 115)
-    bounds=d.textbbox((0,0),label,font=f)
-    width=bounds[2]-bounds[0]
-    x=(1400-width)//2
-    d.text((x+10,108+11),label,font=f,fill="#14141B",stroke_width=8,stroke_fill="#07070A")
-    d.text((x,108),label,font=f,fill="#F6F6FA",stroke_width=3,stroke_fill="#90909B")
-    sf=font(25);sub=subtitle.upper()[:42]
-    w=d.textbbox((0,0),sub,font=sf)[2]
-    d.text(((1400-w)//2,320),sub,font=sf,fill="#D9D7DF")
-    out=io.BytesIO();im.save(out,format="PNG",optimize=True);out.seek(0)
+    rng=random.Random(2032)
+
+    # Subtle ink/manga composition restricted to the left and right edges.
+    for mirror in (False,True):
+        def pt(x,y):
+            return ((W-x) if mirror else x,y)
+        # Sharp illustration-inspired layers and abstract character silhouette.
+        for i in range(9):
+            y=i*54-60
+            xend=180+rng.randrange(20,85)
+            shade=rng.choice(["#17191F","#242630","#363943","#5D606A","#A5A8B3","#DFE1E8"])
+            d.polygon([pt(0,y),pt(xend,y+30),pt(60,y+80)],fill=shade)
+        # Rounded hood/head profile silhouette, no copied character assets.
+        d.ellipse((*(pt(70,83)),*(pt(235,250))),fill="#22252D")
+        d.polygon([pt(56,250),pt(190,204),pt(280,420),pt(0,420)],fill="#30343C")
+        d.polygon([pt(90,155),pt(145,117),pt(235,183),pt(155,170)],fill="#A3A6AE")
+        d.polygon([pt(130,194),pt(214,176),pt(181,201)],fill="#F0F1F4")
+        for j in range(8):
+            y=20+j*52
+            d.line((pt(12,y),pt(240+(j%3)*35,y-36)),
+                   fill="#5C606A",width=2)
+
+    # Center: clean, dark reading zone and modest silver ornamental frame.
+    d.rounded_rectangle((260,64,1140,350),radius=22,fill="#090B10",
+                        outline="#4D505C",width=2)
+    d.line((300,92,1100,92),fill="#717582",width=2)
+    d.line((300,310,1100,310),fill="#717582",width=2)
+    d.polygon([(700,66),(716,84),(700,99),(684,84)],fill="#E7E8EE")
+    d.polygon([(700,322),(712,335),(700,348),(688,335)],fill="#7C8190")
+
+    # Guaranteed LARGE logo: 5 vector glyphs, independent of installed fonts.
+    glyphs={
+        "N":[[(4,172),(4,4),(123,172),(123,4)]],
+        "A":[[(4,172),(64,4),(124,172)],[(28,116),(101,116)]],
+        "T":[[(3,4),(125,4)],[(64,4),(64,172)]],
+        "I":[[(18,4),(108,4)],[(64,4),(64,172)],[(18,172),(108,172)]],
+        "X":[[(5,4),(123,172)],[(123,4),(5,172)]],
+    }
+    x0=345
+    y0=113
+    for ix,letter in enumerate("NATIX"):
+        x=x0+ix*148
+        for part in glyphs[letter]:
+            coords=[(x+px,y0+py) for px,py in part]
+            shadow=[(px+5,py+7) for px,py in coords]
+            d.line(shadow,fill="#0A0B10",width=43,joint="curve")
+            d.line(coords,fill="#676D79",width=32,joint="curve")
+            d.line(coords,fill="#F5F6FB",width=25,joint="curve")
+    # Mark deliberately centered below, no font dependency for the wordmark.
+    # Tiny secondary decorations are not used to carry the brand name.
+    d.line((440,362,960,362),fill="#BFC3CC",width=2)
+    d.polygon([(700,355),(709,362),(700,369),(691,362)],fill="#EDEEF5")
+
+    out=io.BytesIO()
+    im.save(out,format="PNG",optimize=True)
+    out.seek(0)
     return out
 
 def emoji(kind):
