@@ -59,6 +59,23 @@ class Natix(discord.Client):
 
     async def on_ready(self):
         LOG.info("NATIX logged in as %s (guilds: %s)",self.user,len(self.guilds))
+        # Remove stale *guild-scoped* commands left by older bot versions.
+        # Global commands are synchronized in setup_hook() from the new 9-command tree.
+        if getattr(self,"_legacy_commands_cleaned",False):
+            return
+        self._legacy_commands_cleaned=True
+        testing=os.getenv("DISCORD_GUILD_ID","").strip()
+        for guild in self.guilds:
+            if testing and str(guild.id)==testing:
+                continue
+            try:
+                obj=discord.Object(id=guild.id)
+                self.tree.clear_commands(guild=obj)
+                cleaned=await self.tree.sync(guild=obj)
+                LOG.info("Removed old NATIX guild commands on %s (remaining=%s)",
+                         guild.id,len(cleaned))
+            except discord.HTTPException:
+                LOG.exception("Could not clear old guild-specific commands on %s",guild.id)
 
     @tasks.loop(seconds=45)
     async def settle_giveaways(self):
