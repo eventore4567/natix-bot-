@@ -49,3 +49,14 @@ Give the bot permission to manage ticket channels, send messages, read history, 
 - Transcripts export all messages still available in the Discord channel history, with attachment URLs; already deleted messages cannot be reconstructed.
 - Original emoji pack is generated with /emojis; failures are reported if permissions or server emoji slots are insufficient.
 - Passing automated tests does not replace acceptance testing against a live Discord server.
+
+
+## Build your own panels
+- /custom create: choose a title and long description.
+- /custom item: add a right-side button with a label, description, emoji and action (open a ticket or product category).
+- /custom publish: post the panel to a channel with the NATIX banner.
+- /custom list: find panel IDs and number of buttons.
+- /custom remove: disable a panel and its old buttons.
+- /promoplan set, /promoplan list, /promoplan disable: customize promotion prices and descriptions.
+
+Custom panels and their button mappings are stored in SQLite and re-registered after a restart. Pasting custom text into a command does not install any executable code.
