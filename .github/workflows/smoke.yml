@@ -3,6 +3,9 @@ on:
   push:
     branches: [main, natix-marketplace-v2]
   workflow_dispatch:
+concurrency:
+  group: natix-smoke-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   smoke:
     runs-on: ubuntu-latest
@@ -101,6 +104,12 @@ jobs:
           assert "natix:catalog:other:1" in serialized
           client=Natix(store=db)
           assert len(client.tree.get_commands())>=20
+          cmd_by_name={c.name:c for c in client.tree.get_commands()}
+          assert all(k in cmd_by_name for k in ("shop","support","trade","custom","order","product","diagnostic"))
+          custom_group=cmd_by_name["custom"]
+          assert all(custom_group.get_command(k) is not None for k in
+                     ("create","edit","item","items","button_edit","button_remove","preview","publish","remove"))
+
           assert not client.intents.message_content
           print("NATIX tests passed: commands",len(client.tree.get_commands()),"panels",len(PANELS))
           PY
