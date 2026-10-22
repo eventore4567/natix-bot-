@@ -195,13 +195,20 @@ class VouchModal(ui.Modal,title="✦ Témoignage NATIX"):
                   (i.guild_id,i.user.id,n,self.review.value,int(time.time())))
         await respond(i,"Ton témoignage est enregistré, en attente de validation du staff.")
 
-async def show_category(i,cat):
+async def show_category(i,cat,page=0,edit=False):
     db=store(i)
-    if cat not in [x[0] for x in CATEGORIES]:return await respond(i,"Catégorie inconnue.")
-    products=db.products(i.guild_id,cat,limit=8)
-    if not products:return await respond(i,"Aucun produit publié dans cette catégorie.")
-    view=CatalogView(products,cat)
-    await i.response.send_message(view=view,ephemeral=True)
+    if cat not in [x[0] for x in CATEGORIES]:
+        return await respond(i,"Catégorie inconnue.")
+    page=max(0,min(int(page),10000))
+    products,total=db.products_page(i.guild_id,cat,page,page_size=6)
+    if not total:
+        return await respond(i,"Aucun produit disponible dans cette catégorie.")
+    if not products:
+        return await respond(i,"Cette page du catalogue n'existe plus.")
+    view=CatalogView(products,cat,page,total)
+    if edit:
+        return await i.response.edit_message(view=view)
+    return await i.response.send_message(view=view,ephemeral=True)
 
 async def ticket_action(i,key):
     db=store(i)
@@ -299,6 +306,11 @@ async def dispatch(i,key):
             if r["action_kind"]=="category":
                 return await show_category(i,r["action_value"])
             return await respond(i,"Action non configurée.")
+        if key.startswith("catalog:"):
+            parts=key.split(":")
+            if len(parts)!=3 or not parts[2].isdigit():
+                return await respond(i,"Page du catalogue invalide.")
+            return await show_category(i,parts[1],int(parts[2]),edit=True)
         if key.startswith("category:"):return await show_category(i,key.split(":",1)[1])
         if key.startswith("product:"):
             p=store(i).product(i.guild_id,int(key.split(":")[1]))
