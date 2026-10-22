@@ -20,6 +20,7 @@ from .config import ORDER_STATES, PANEL_KINDS
 from .db import parse_price
 from .emojis import EMOJIS
 from .handlers import finish_giveaway
+from .paypal import paypal_username
 from .util import NO_PINGS, is_staff, money, parse_duration, reply, safe, stock_text
 
 LOG = logging.getLogger("natix.commands")
@@ -90,14 +91,7 @@ def paypal_contact_message(settings):
 
     Returns None while the owner has not set both the username and email.
     """
-    raw=(settings.get("paypal") or "").strip()
-    if raw.startswith("https://"):
-        parsed=urlsplit(raw)
-        if parsed.hostname not in ("paypal.me","www.paypal.me"):
-            raw=""
-        else:
-            raw=(parsed.path.strip("/").split("/") or [""])[0]
-    username=raw.lstrip("@")
+    username=paypal_username(settings.get("paypal"))
     email=(settings.get("paypal_email") or "").strip()
     if not re.fullmatch(r"[A-Za-z0-9._-]{1,80}",username):
         return None
