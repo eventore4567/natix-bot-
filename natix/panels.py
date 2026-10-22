@@ -86,7 +86,7 @@ class Panel(ui.LayoutView):
         elif kind=="promo":
             frame.add_item(txt("## ✦ NATIX • PROMOTION SLOTS\n"
                   "Promotions soumises à approbation du staff. Choisis une formule."))
-            for key,name,price in PLANS:
+            for key,name,price in (store.promo_plans(guild.id) if guild else PLANS):
                 frame.add_item(sep())
                 frame.add_item(ui.Section(txt("**"+name+"**\n"+price),
                     accessory=ActionButton("Choisir","plan:"+key,server_emoji(guild,"star","⭐"))))
@@ -192,4 +192,24 @@ class CatalogView(ui.LayoutView):
             box.add_item(sep())
             box.add_item(ui.Section(txt("**"+safe(prod["name"],70)+"**\n"+
                  safe(prod["details"],120)+"\n"+price+" · "+stock),accessory=btn))
+        self.add_item(box)
+
+
+class CustomPanel(ui.LayoutView):
+    """Staff-composed standalone panel with persistent side accessory buttons."""
+    def __init__(self,db,record,guild=None):
+        super().__init__(timeout=None)
+        cfg=db.settings(record["guild"])
+        try: accent=discord.Colour(int(cfg["color"].strip("#"),16))
+        except (TypeError,ValueError):accent=discord.Colour(0xE6E4F0)
+        box=ui.Container(accent_colour=accent)
+        box.add_item(ui.MediaGallery(discord.MediaGalleryItem(
+            media=cfg["banner"] or "attachment://natix_banner.png")))
+        box.add_item(txt("## ✦ "+safe(record["title"],100)+"\n"+safe(record["description"],1500)))
+        for item in db.custom_items(record["id"])[:6]:
+            box.add_item(sep())
+            box.add_item(ui.Section(
+                txt("**"+safe(item["label"],70)+"**\n"+safe(item["description"],160)),
+                accessory=ActionButton("Ouvrir","custom:"+str(item["id"]),item["emoji"] or "🔹")))
+        box.add_item(txt("-# NATIX · Panneau personnalisé"))
         self.add_item(box)
