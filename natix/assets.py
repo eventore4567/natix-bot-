@@ -1,9 +1,8 @@
 """Generate NATIX original graphic assets; no copied logo or trademark art."""
 import io
-import math
 import random
 import re
-from PIL import Image,ImageDraw,ImageFont
+from PIL import Image,ImageDraw
 import discord
 
 CATEGORIES=[
@@ -97,46 +96,3 @@ def banner(title="NATIX",subtitle="PREMIUM DISCORD SHOP"):
     out.seek(0)
     return out
 
-def emoji(kind):
-    im=Image.new("RGBA",(128,128),(0,0,0,0));d=ImageDraw.Draw(im)
-    light=(244,244,251,255)
-    d.ellipse((6,6,122,122),fill=(8,8,13,255),outline=light,width=4)
-    if kind in ("shop","cart"):
-        d.rounded_rectangle((30,51,99,99),radius=9,outline=light,width=7)
-        d.arc((44,23,85,76),180,360,fill=light,width=7)
-    elif kind=="gift":
-        d.rectangle((32,55,97,101),outline=light,width=6)
-        d.rectangle((26,44,104,59),fill=light)
-        d.line((64,45,64,101),fill=light,width=7)
-        d.ellipse((40,25,64,47),outline=light,width=5)
-        d.ellipse((64,25,89,47),outline=light,width=5)
-    elif kind=="ticket":
-        d.rounded_rectangle((29,38,99,91),radius=8,outline=light,width=7)
-        d.line((64,42,64,88),fill=light,width=5)
-    elif kind=="support":
-        d.arc((26,25,102,104),180,360,fill=light,width=8)
-        d.rounded_rectangle((23,65,40,92),radius=5,fill=light)
-        d.rounded_rectangle((88,65,105,92),radius=5,fill=light)
-    elif kind=="trade":
-        d.arc((24,24,103,103),215,35,fill=light,width=9)
-        d.arc((24,24,103,103),35,215,fill=light,width=9)
-        d.polygon([(100,25),(111,51),(82,46)],fill=light)
-        d.polygon([(28,103),(17,77),(46,83)],fill=light)
-    elif kind=="star":
-        d.regular_polygon((64,63,42),5,rotation=270,fill=light)
-    elif kind=="shield":
-        d.polygon([(64,22),(101,38),(95,83),(64,106),(33,83),(27,38)],outline=light,width=7)
-        d.line((46,64,59,77,84,50),fill=light,width=7)
-    else:
-        for k in range(12):
-            a=k*math.pi/6
-            d.line((64+26*math.cos(a),64+26*math.sin(a),
-                    64+44*math.cos(a),64+44*math.sin(a)),fill=light,width=7)
-        d.ellipse((51,51,77,77),fill=light)
-    out=io.BytesIO();im.save(out,format="PNG");return out.getvalue()
-
-def server_emoji(guild,name,fallback):
-    if guild:
-        found=discord.utils.get(guild.emojis,name="nx_"+name)
-        if found:return found
-    return fallback
