@@ -5,6 +5,7 @@ custom_id stable (« nx:… ») traité par le routeur de natix/handlers.py, ce 
 les rend fonctionnels même après un redémarrage du bot.
 """
 import discord
+import re
 from discord import ui
 
 from .config import BANNERS, ORDER_STATES, TICKET_KINDS
@@ -342,10 +343,10 @@ def pplme_panel(store, guild_id, contact):
         ui.Separator(),
         ui.TextDisplay("### Informations PayPal\n" + contact),
     ]
-    if email:
+    if re.fullmatch(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", email):
         items.extend([
             ui.Separator(),
-            ui.TextDisplay("**E-mail à copier :**\n```text\n" + safe(email, 160) + "\n```"),
+            ui.TextDisplay("**E-mail à copier :**\n```text\n" + email + "\n```"),
             ui.ActionRow(ui.Button(
                 label="📋 Copier l'e-mail", custom_id="nx:ppl:copy",
                 style=discord.ButtonStyle.secondary)),
