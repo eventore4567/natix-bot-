@@ -33,6 +33,23 @@ jobs:
           oid=db.create_order(1,100,db.product(1,pid),1,"test")
           assert db.order(1,oid)["state"]=="pending"
           assert db.order_state(1,oid,"accepted",999)
+          pid_stock=db.add_product(1,"nitro","Stocked","In stock","20 EUR",2)
+          order_stock=db.create_order(1,101,db.product(1,pid_stock),1)
+          ok,why=db.transition_order(1,order_stock,"delivered",900)
+          assert not ok and db.product(1,pid_stock)["stock"]==2,why
+          assert db.transition_order(1,order_stock,"accepted",900)[0]
+          assert db.transition_order(1,order_stock,"processing",900)[0]
+          assert db.transition_order(1,order_stock,"delivered",900)[0]
+          assert db.product(1,pid_stock)["stock"]==1
+          assert db.transition_order(1,order_stock,"delivered",900)[0]
+          assert db.product(1,pid_stock)["stock"]==1
+          canceled=db.create_order(1,102,db.product(1,pid_stock),1)
+          assert db.transition_order(1,canceled,"cancelled",900)[0]
+          assert not db.transition_order(1,canceled,"delivered",900)[0]
+          assert db.order(2,order_stock) is None
+          assert not db.transition_order(2,order_stock,"cancelled",900)[0]
+          db.attach_order_ticket(1,oid,123)
+          assert db.order(1,oid)["channel"]==123
           db.create_ticket(123,1,100,"order")
           assert db.active_ticket(1,100,"order")["channel"]==123
           assert len(CATEGORIES)==6
@@ -73,6 +90,15 @@ jobs:
           dense=CatalogView(db.products(1,"other"),"other")
           assert len(dense.to_components())>=2
           assert all(len(box["components"])<=10 for box in dense.to_components())
+          page,total=db.products_page(1,"other",0,6)
+          assert len(page)==6 and total==9
+          page2,total2=db.products_page(1,"other",1,6)
+          assert len(page2)==3 and total2==9
+          nav=CatalogView(page,"other",0,total)
+          assert all(len(box["components"])<=10 for box in nav.to_components())
+          serialized=str(nav.to_components())
+          assert "Suivant" in serialized
+          assert "natix:catalog:other:1" in serialized
           client=Natix(store=db)
           assert len(client.tree.get_commands())>=20
           assert not client.intents.message_content
