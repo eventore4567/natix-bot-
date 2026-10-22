@@ -102,6 +102,50 @@ jobs:
           serialized=str(nav.to_components())
           assert "Suivant" in serialized
           assert "natix:catalog:other:1" in serialized
+          # Ticket ownership must be persisted and atomic.
+          assert db.claim_ticket(123,555)
+          assert db.ticket(123)["claimed_by"]==555
+          assert not db.claim_ticket(123,999)
+          assert not db.release_ticket(123,999)
+          assert db.release_ticket(123,555)
+          assert db.ticket(123)["claimed_by"]==0
+          db.state_ticket(123,"closed")
+          assert not db.claim_ticket(123,555)
+          # Upgrade an existing database without dropping prior tickets.
+          import os,sqlite3,tempfile
+          fd,path=tempfile.mkstemp(suffix=".sqlite")
+          os.close(fd)
+          legacy=sqlite3.connect(path)
+          legacy.execute("CREATE TABLE tickets(channel INTEGER PRIMARY KEY,guild INTEGER,owner INTEGER,kind TEXT,state TEXT)")
+          legacy.execute("INSERT INTO tickets VALUES (456,1,100,'support','open')")
+          legacy.commit()
+          legacy.close()
+          upgraded=Store(path)
+          assert upgraded.ticket(456)["claimed_by"]==0
+          assert upgraded.claim_ticket(456,789)
+          upgraded.db.close()
+          os.unlink(path)
+          # Full accessible history is exported; no arbitrary 1000-message limit.
+          from datetime import datetime,timezone
+          from types import SimpleNamespace
+          import asyncio
+          from natix.services import transcript_parts
+          class TestHistory:
+              def history(self,limit=None,oldest_first=False):
+                  assert limit is None and oldest_first is True
+                  async def messages():
+                      for n in range(1205):
+                          yield SimpleNamespace(
+                              created_at=datetime.now(timezone.utc),
+                              author=SimpleNamespace(id=100,name="Tester"),
+                              content="SAVED ENTRY "+str(n),
+                              embeds=[],attachments=[]
+                          )
+                  return messages()
+          transcript=b"".join(asyncio.run(transcript_parts(TestHistory())))
+          assert b"SAVED ENTRY 0" in transcript
+          assert b"SAVED ENTRY 1204" in transcript
+          assert len(transcript.split(b"SAVED ENTRY"))==1206
           client=Natix(store=db)
           assert len(client.tree.get_commands())>=20
           cmd_by_name={c.name:c for c in client.tree.get_commands()}
