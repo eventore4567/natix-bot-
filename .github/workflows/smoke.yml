@@ -1,0 +1,33 @@
+name: NATIX smoke tests
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements.txt
+      - run: python -m py_compile main.py
+      - name: Build all interactive panels offline
+        run: |
+          python - <<'PY'
+          import os
+          os.environ['DISCORD_TOKEN'] = 'test-token'
+          import discord
+          discord.Client.run=lambda self,token: None
+          import main
+          for name in main.PANELS:
+              panel=main.Panel(name)
+              assert panel.is_persistent(), name
+          assert main.TicketControls().is_persistent()
+          assert main.GiveView().is_persistent()
+          assert main.natix_banner('NATIX').read(8)==b'\x89PNG\r\n\x1a\n'
+          for k in ('gift','shop','support','star'):
+              assert len(main.emoji_image(k))>0
+          print('NATIX smoke tests passed')
+          PY
