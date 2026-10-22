@@ -59,6 +59,20 @@ jobs:
           assert custom.is_persistent()
           assert all(len(box.children)<=10 for box in custom.children)
           assert sum(len(box.children) for box in custom.children)<=30
+          # Validate the serialized Discord API payload, not only local classes.
+          for candidate in [*(Panel(name,db) for name in PANELS),catalog,custom]:
+              components=candidate.to_components()
+              assert 1<=len(components)<=10
+              for component in components:
+                  assert component["type"]==17
+                  assert len(component["components"])<=10, component
+              assert len(components)<=10
+          # Eight products should still serialize into multiple safe containers.
+          for k in range(9):
+              db.add_product(1,"other","Item "+str(k),"Description","5 EUR",2)
+          dense=CatalogView(db.products(1,"other"),"other")
+          assert len(dense.to_components())>=2
+          assert all(len(box["components"])<=10 for box in dense.to_components())
           client=Natix(store=db)
           assert len(client.tree.get_commands())>=20
           assert not client.intents.message_content
