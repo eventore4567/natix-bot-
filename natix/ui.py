@@ -9,6 +9,7 @@ from discord import ui
 
 from .config import BANNERS, ORDER_STATES, TICKET_KINDS
 from .emojis import EMOJIS
+from .paypal import paypal_base
 from .util import money, safe, stock_text
 
 E = EMOJIS.text
@@ -347,15 +348,9 @@ def paypal_panel(store, guild_id):
     No order is paid or marked paid here: the amount and "J'ai payé" button
     belong inside the private ticket created by an actual purchase.
     """
-    from urllib.parse import urlsplit
-
     settings = store.settings(guild_id)
     name = safe(settings["name"], 40)
-    paypal = (settings.get("paypal") or "").strip()
-    if paypal and not paypal.startswith("https://"):
-        paypal = "https://paypal.me/" + paypal.lstrip("@")
-    if paypal and urlsplit(paypal).hostname not in ("paypal.me", "www.paypal.me"):
-        paypal = ""
+    paypal = paypal_base(settings.get("paypal"))
 
     steps = [
         "Ouvre la boutique NATIX et sélectionne ton produit.",
@@ -470,14 +465,12 @@ CURRENCY_CODES = {"€": "EUR", "$": "USD", "£": "GBP", "CHF": "CHF", "CAD": "C
 
 
 def paypal_link(s, cents):
-    """Lien PayPal.me avec le montant pré-rempli (ou None si PayPal n'est pas configuré)."""
-    base = (s.get("paypal") or "").strip()
+    """Lien PayPal.me valide, avec montant pré-rempli, pour le ticket."""
+    base = paypal_base(s.get("paypal"))
     if not base:
         return None
-    if not base.startswith("https://"):
-        base = "https://paypal.me/" + base.lstrip("@")
     code = CURRENCY_CODES.get(s.get("currency", "€").strip(), "EUR")
-    return f"{base.rstrip('/')}/{int(cents) / 100:.2f}{code}"
+    return f"{base}/{int(cents) / 100:.2f}{code}"
 
 
 def payment_section(s, cents, paid):
