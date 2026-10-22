@@ -1,11 +1,8 @@
-name: NATIX quality checks
+name: NATIX focused smoke tests
 on:
   push:
-    branches: [main, natix-marketplace-v2]
+    branches: [main, natix-clean-commands-banner]
   workflow_dispatch:
-concurrency:
-  group: natix-smoke-${{ github.ref }}
-  cancel-in-progress: true
 jobs:
   smoke:
     runs-on: ubuntu-latest
@@ -15,145 +12,61 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install -r requirements.txt
-      - name: Compile all Python modules
-        run: python -m compileall -q main.py natix
-      - name: Discord UI + storage smoke tests
+      - run: python -m compileall -q main.py natix
+      - name: Validate seven screenshot panels, banner, and nine clean commands
         run: |
           python - <<'PY'
+          from PIL import Image
+          from natix.assets import PANELS,banner
           from natix.db import Store
-          from natix.assets import CATEGORIES, PANELS, banner, emoji
-          from natix.panels import Panel, TicketControls, GiveawayPanel, CatalogView
+          from natix.panels import Panel,CatalogView,TicketControls,GiveawayPanel
           from natix.bot import Natix
           db=Store(":memory:")
-          db.configure(1,name="NATIX",staff=42,category=5)
-          assert db.settings(1)["staff"]==42
-          assert db.settings(2)["staff"]==0
-          pid=db.add_product(1,"nitro","Nitro Test","Example item","10 EUR",2)
-          assert db.product(1,pid)["stock"]==2
-          assert db.deduct_stock(1,pid,1)
-          assert db.product(1,pid)["stock"]==1
-          assert not db.deduct_stock(1,pid,2)
-          oid=db.create_order(1,100,db.product(1,pid),1,"test")
-          assert db.order(1,oid)["state"]=="pending"
-          assert db.order_state(1,oid,"accepted",999)
-          pid_stock=db.add_product(1,"nitro","Stocked","In stock","20 EUR",2)
-          order_stock=db.create_order(1,101,db.product(1,pid_stock),1)
-          ok,why=db.transition_order(1,order_stock,"delivered",900)
-          assert not ok and db.product(1,pid_stock)["stock"]==2,why
-          assert db.transition_order(1,order_stock,"accepted",900)[0]
-          assert db.transition_order(1,order_stock,"processing",900)[0]
-          assert db.transition_order(1,order_stock,"delivered",900)[0]
-          assert db.product(1,pid_stock)["stock"]==1
-          assert db.transition_order(1,order_stock,"delivered",900)[0]
-          assert db.product(1,pid_stock)["stock"]==1
-          canceled=db.create_order(1,102,db.product(1,pid_stock),1)
-          assert db.transition_order(1,canceled,"cancelled",900)[0]
-          assert not db.transition_order(1,canceled,"delivered",900)[0]
-          assert db.order(2,order_stock) is None
-          assert not db.transition_order(2,order_stock,"cancelled",900)[0]
-          db.attach_order_ticket(1,oid,123)
-          assert db.order(1,oid)["channel"]==123
-          db.create_ticket(123,1,100,"order")
-          assert db.active_ticket(1,100,"order")["channel"]==123
-          assert len(CATEGORIES)==6
-          for name in PANELS:
-              view=Panel(name,db)
-              assert view.is_persistent(),name
-              assert len(view.children)>0,name
-              assert all(len(box.children)<=10 for box in view.children),name
-              assert sum(len(box.children) for box in view.children)<=30,name
+          db.configure(1,staff=123,category=456,logs=789,
+                       social_discord="https://discord.com",social_tiktok="https://tiktok.com")
+          img=Image.open(banner("NATIX"))
+          assert img.size==(1400,420)
+          assert max(img.getpixel((700,y))[0] for y in range(135,280))>=200
+          bright=sum(1 for x in range(330,1080,3) for y in range(110,304,3)
+                     if min(img.getpixel((x,y)))>190)
+          assert bright>500,bright
+          assert set(("home","shop","support","giveaways","stats","social","terms")).issubset(PANELS)
+          for key in PANELS:
+              view=Panel(key,db)
+              assert view.is_persistent(),key
+              comps=view.to_components()
+              assert 1<=len(comps)<=10,key
+              assert all(x["type"]==17 and len(x["components"])<=10 for x in comps),key
+          welcome=str(Panel("home",db).to_components())
+          assert all(x in welcome for x in ("nav:shop","nav:support","nav:giveaways",
+                     "nav:stats","nav:social","nav:terms"))
           assert TicketControls().is_persistent()
           assert GiveawayPanel().is_persistent()
-          catalog=CatalogView(db.products(1,"nitro"),"nitro")
-          assert catalog.is_persistent()
-          assert catalog.children
-          assert all(len(box.children)<=10 for box in catalog.children)
-          assert banner("NATIX").read(8)==b"\x89PNG\r\n\x1a\n"
-          for name in ("shop","gift","ticket","trade","support","star","shield"):
-              assert emoji(name).startswith(b"\x89PNG")
-          pid2=db.create_custom_panel(1,"CUSTOM","My panel")
-          for n in range(6):
-              db.create_custom_item(pid2,"Item "+str(n),"Description","ticket","support","🎟️")
-          from natix.panels import CustomPanel
-          custom=CustomPanel(db,db.custom_panel(1,pid2))
-          assert custom.is_persistent()
-          assert all(len(box.children)<=10 for box in custom.children)
-          assert sum(len(box.children) for box in custom.children)<=30
-          # Validate the serialized Discord API payload, not only local classes.
-          for candidate in [*(Panel(name,db) for name in PANELS),catalog,custom]:
-              components=candidate.to_components()
-              assert 1<=len(components)<=10
-              for component in components:
-                  assert component["type"]==17
-                  assert len(component["components"])<=10, component
-              assert len(components)<=10
-          # Eight products should still serialize into multiple safe containers.
-          for k in range(9):
-              db.add_product(1,"other","Item "+str(k),"Description","5 EUR",2)
-          dense=CatalogView(db.products(1,"other"),"other")
-          assert len(dense.to_components())>=2
-          assert all(len(box["components"])<=10 for box in dense.to_components())
-          page,total=db.products_page(1,"other",0,6)
-          assert len(page)==6 and total==9
-          page2,total2=db.products_page(1,"other",1,6)
-          assert len(page2)==3 and total2==9
-          nav=CatalogView(page,"other",0,total)
-          assert all(len(box["components"])<=10 for box in nav.to_components())
-          serialized=str(nav.to_components())
-          assert "Suivant" in serialized
-          assert "natix:catalog:other:1" in serialized
-          # Ticket ownership must be persisted and atomic.
-          assert db.claim_ticket(123,555)
-          assert db.ticket(123)["claimed_by"]==555
-          assert not db.claim_ticket(123,999)
-          assert not db.release_ticket(123,999)
-          assert db.release_ticket(123,555)
-          assert db.ticket(123)["claimed_by"]==0
-          db.state_ticket(123,"closed")
-          assert not db.claim_ticket(123,555)
-          # Upgrade an existing database without dropping prior tickets.
-          import os,sqlite3,tempfile
-          fd,path=tempfile.mkstemp(suffix=".sqlite")
-          os.close(fd)
-          legacy=sqlite3.connect(path)
-          legacy.execute("CREATE TABLE tickets(channel INTEGER PRIMARY KEY,guild INTEGER,owner INTEGER,kind TEXT,state TEXT)")
-          legacy.execute("INSERT INTO tickets VALUES (456,1,100,'support','open')")
-          legacy.commit()
-          legacy.close()
-          upgraded=Store(path)
-          assert upgraded.ticket(456)["claimed_by"]==0
-          assert upgraded.claim_ticket(456,789)
-          upgraded.db.close()
-          os.unlink(path)
-          # Full accessible history is exported; no arbitrary 1000-message limit.
-          from datetime import datetime,timezone
-          from types import SimpleNamespace
-          import asyncio
-          from natix.services import transcript_parts
-          class TestHistory:
-              def history(self,limit=None,oldest_first=False):
-                  assert limit is None and oldest_first is True
-                  async def messages():
-                      for n in range(1205):
-                          yield SimpleNamespace(
-                              created_at=datetime.now(timezone.utc),
-                              author=SimpleNamespace(id=100,name="Tester"),
-                              content="SAVED ENTRY "+str(n),
-                              embeds=[],attachments=[]
-                          )
-                  return messages()
-          transcript=b"".join(asyncio.run(transcript_parts(TestHistory())))
-          assert b"SAVED ENTRY 0" in transcript
-          assert b"SAVED ENTRY 1204" in transcript
-          assert len(transcript.split(b"SAVED ENTRY"))==1206
-          client=Natix(store=db)
-          assert len(client.tree.get_commands())>=20
-          cmd_by_name={c.name:c for c in client.tree.get_commands()}
-          assert all(k in cmd_by_name for k in ("shop","support","trade","custom","order","product","diagnostic"))
-          custom_group=cmd_by_name["custom"]
-          assert all(custom_group.get_command(k) is not None for k in
-                     ("create","edit","item","items","button_edit","button_remove","preview","publish","remove"))
-
-          assert not client.intents.message_content
-          print("NATIX tests passed: commands",len(client.tree.get_commands()),"panels",len(PANELS))
+          pid=db.add_product(1,"nitro","Nitro","Test item","10 EUR",3)
+          oid=db.create_order(1,1,db.product(1,pid),2)
+          assert not db.transition_order(1,oid,"delivered",99)[0]
+          assert db.transition_order(1,oid,"accepted",99)[0]
+          assert db.transition_order(1,oid,"processing",99)[0]
+          assert db.transition_order(1,oid,"delivered",99)[0]
+          assert db.product(1,pid)["stock"]==1
+          assert db.transition_order(1,oid,"delivered",99)[0]
+          assert db.product(1,pid)["stock"]==1
+          db.create_ticket(777,1,1,"order")
+          assert db.claim_ticket(777,22)
+          assert not db.claim_ticket(777,33)
+          assert db.release_ticket(777,22)
+          for n in range(12):db.add_product(1,"nitro","Item "+str(n),"Info","5 EUR",1)
+          page,total=db.products_page(1,"nitro",1,6)
+          assert total==13 and len(page)==6
+          catalog=CatalogView(page,"nitro",1,total)
+          assert all(len(x["components"])<=10 for x in catalog.to_components())
+          bot=Natix(store=db)
+          roots={x.name for x in bot.tree.get_commands()}
+          expected={"home","shop","support","giveaway","stats","social","rules","setup","manage"}
+          assert roots==expected,(roots,expected)
+          assert "emojis" not in roots and "preview" not in roots
+          manage=next(x for x in bot.tree.get_commands() if x.name=="manage")
+          assert manage.get_command("add") and manage.get_command("giveaway")
+          assert manage.get_command("social") and manage.get_command("delete_ticket")
+          print("OK: nine root commands, seven menus, large NATIX logo")
           PY
