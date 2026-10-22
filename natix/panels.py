@@ -2,7 +2,7 @@
 import re
 import discord
 from discord import ui
-from .assets import CATEGORIES, PANELS, PLANS, TICKET_TYPES, safe, server_emoji
+from .assets import CATEGORIES, PANELS, PLANS, TICKET_TYPES, safe
 
 def pack_containers(view, source, colour):
     """Split Discord V2 containers: Discord permits up to 10 direct children each."""
@@ -12,13 +12,6 @@ def pack_containers(view, source, colour):
         for child in items[offset:offset+10]:
             box.add_item(child)
         view.add_item(box)
-
-def button_emoji(guild,value):
-    """Use a generated NATIX emoji name or an ordinary Unicode emoji."""
-    if not value:return "🔹"
-    if value.startswith("nx_"):
-        return server_emoji(guild,value[3:],"🔹")
-    return value
 
 def txt(text):
     return ui.TextDisplay(text)
@@ -150,7 +143,7 @@ class Panel(ui.LayoutView):
                 "Décris ce que tu proposes et ce que tu cherches dans ton ticket."))
             frame.add_item(sep())
             frame.add_item(ui.ActionRow(
-                ActionButton("Start a Trade","trade:start",server_emoji(guild,"trade","🔄"),discord.ButtonStyle.primary),
+                ActionButton("Start a Trade","trade:start",None,discord.ButtonStyle.primary),
                 ActionButton("Previous Trades","trade:history","🕒"),
             ))
             frame.add_item(txt("-# Les échanges ne sont pas exécutés automatiquement."))
@@ -160,7 +153,7 @@ class Panel(ui.LayoutView):
             for key,name,price in (store.promo_plans(guild.id) if guild else PLANS):
                 frame.add_item(sep())
                 frame.add_item(ui.Section(txt("**"+name+"**\n"+price),
-                    accessory=ActionButton("Choisir","plan:"+key,server_emoji(guild,"star","⭐"))))
+                    accessory=ActionButton("Choisir","plan:"+key,None)))
             frame.add_item(sep())
             frame.add_item(txt("**Comment commander ?**\n"
                 "1. Sélectionne ton offre\n2. Précise ton serveur dans le ticket\n3. Attends la validation du staff.\n"
@@ -292,6 +285,6 @@ class CustomPanel(ui.LayoutView):
             box.add_item(sep())
             box.add_item(ui.Section(
                 txt("**"+safe(item["label"],70)+"**\n"+safe(item["description"],160)),
-                accessory=ActionButton("Ouvrir","custom:"+str(item["id"]),button_emoji(guild,item["emoji"]))))
+                accessory=ActionButton("Ouvrir","custom:"+str(item["id"]),None)))
         box.add_item(txt("-# NATIX · Panneau personnalisé"))
         pack_containers(self,box,accent)
