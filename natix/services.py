@@ -158,7 +158,7 @@ class BuyModal(ui.Modal,title="✦ Commander sur NATIX"):
         # Create or find the private ticket before recording the order. Failed
         # channel permissions must not generate a phantom unpaid order.
         channel=await create_ticket(i,"order",details)
-        if channel is None:
+        if not isinstance(channel,discord.TextChannel):
             return
         order_id=db.create_order(i.guild_id,i.user.id,product,number,self.notes.value)
         db.attach_order_ticket(i.guild_id,order_id,channel.id)
