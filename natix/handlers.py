@@ -16,6 +16,7 @@ from discord import ui
 from . import ui as V
 from .config import ORDER_STATES, TICKET_KINDS
 from .db import parse_price
+from .paypal import paypal_username
 from .emojis import EMOJIS
 from .util import NO_PINGS, is_staff, modal_values, money, reply, safe, slug
 
@@ -868,20 +869,16 @@ async def cfg_submit(i, parts):
         store.configure(i.guild_id, **{key: check_url(v.get(key)) for key, _, _ in V.SOCIALS})
         refresh = {"social"}
     elif section == "payment":
-        paypal = (v.get("paypal") or "").strip()
-        if paypal.startswith("http"):
-            parts_ = urlsplit(paypal)
-            if parts_.scheme != "https" or parts_.netloc.lower() not in ("paypal.me", "www.paypal.me", "www.paypal.com",
-                                                                         "paypal.com"):
-                raise Oops("Le lien doit être un lien https://paypal.me/…")
-            paypal = paypal.rstrip("/")
-        elif paypal and not re.fullmatch(r"@?[A-Za-z0-9]{1,30}", paypal):
-            raise Oops("Pseudo PayPal.me invalide (lettres et chiffres uniquement).")
+        raw = (v.get("paypal") or "").strip()
+        username = paypal_username(raw) if raw else ""
+        if raw and not username:
+            raise Oops("Lien PayPal invalide. Utilise natixshop, paypal.me/natixshop ou paypal.com/paypalme/natixshop.")
         email = (v.get("paypal_email") or "").strip()
         if email and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
             raise Oops("Email PayPal invalide.")
-        store.configure(i.guild_id, paypal=paypal.lstrip("@"), paypal_email=email,
-                        pay_note=(v.get("pay_note") or "").strip(), pay_other=(v.get("pay_other") or "").strip())
+        store.configure(i.guild_id, paypal=username or "", paypal_email=email,
+                        pay_note=(v.get("pay_note") or "").strip(),
+                        pay_other=(v.get("pay_other") or "").strip())
     elif section == "restock":
         ch = first(v, "restock_channel")
         ping = first(v, "restock_ping") or "none"
@@ -921,6 +918,12 @@ async def cfg_submit(i, parts):
         await i.response.send_message(view=view, ephemeral=True)
     if refresh is not None:
         await refresh_panels(i.client, i.guild_id, refresh or None)
+    if section == "payment":
+        # Always confirm the modal was actually submitted and persisted.
+        await i.followup.send(
+            "✅ **Paiements enregistrés.** Tu peux maintenant utiliser `/pplme`.",
+            ephemeral=True, allowed_mentions=NO_PINGS
+        )
 
 
 # ====================================================================== routeur
