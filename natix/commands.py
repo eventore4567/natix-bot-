@@ -4,12 +4,13 @@ import logging
 import re
 import secrets
 import time
+from types import SimpleNamespace
 
 import discord
 from discord import app_commands,ui
 
 from .assets import CATEGORIES,PANELS,PLANS,TICKET_TYPES,safe,banner,emoji
-from .panels import Panel,GiveawayPanel,CustomPanel
+from .panels import Panel,GiveawayPanel,CustomPanel,CatalogView
 from .services import create_ticket,export_transcript,is_staff,respond,audit
 
 LOG=logging.getLogger("natix.commands")
@@ -205,6 +206,7 @@ def register(tree):
         if stock< -1:return await respond(i,"Le stock doit valoir -1 (illimité) ou plus.")
         pid=i.client.store.add_product(i.guild_id,category.value,name[:90],
                        details[:500],price[:60],stock)
+        i.client.add_view(CatalogView(i.client.store.products(i.guild_id,category.value,limit=8),category.value))
         await respond(i,"✅ Produit **#"+str(pid)+"** ajouté à "+category.name+".")
         await audit(i,"product:add",str(pid))
 
@@ -462,6 +464,9 @@ def register(tree):
         if not re.fullmatch("[a-z0-9_-]{2,30}",key):
             return await respond(i,"Identifiant : lettres minuscules, chiffres, - ou _, de 2 à 30 caractères.")
         i.client.store.set_promo_plan(i.guild_id,key,title,price,description)
+        # Register any new custom plan button for persistent dispatch immediately.
+        guild=SimpleNamespace(id=i.guild_id,emojis=[])
+        i.client.add_view(Panel("promo",i.client.store,guild))
         await respond(i,"✅ Plan **"+safe(title,40)+"** enregistré. Republie /promo.")
         await audit(i,"promoplan:set",key)
 
