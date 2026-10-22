@@ -51,7 +51,7 @@ def banner(title="NATIX",subtitle="PREMIUM DISCORD SHOP"):
             shade=rng.choice(["#17191F","#242630","#363943","#5D606A","#A5A8B3","#DFE1E8"])
             d.polygon([pt(0,y),pt(xend,y+30),pt(60,y+80)],fill=shade)
         # Rounded hood/head profile silhouette, no copied character assets.
-        d.ellipse((*(pt(70,83)),*(pt(235,250))),fill="#22252D")
+        d.ellipse((70,83,235,250) if not mirror else (W-235,83,W-70,250),fill="#22252D")
         d.polygon([pt(56,250),pt(190,204),pt(280,420),pt(0,420)],fill="#30343C")
         d.polygon([pt(90,155),pt(145,117),pt(235,183),pt(155,170)],fill="#A3A6AE")
         d.polygon([pt(130,194),pt(214,176),pt(181,201)],fill="#F0F1F4")
