@@ -51,6 +51,15 @@ class Store:
             """CREATE TABLE IF NOT EXISTS audits(
                 id INTEGER PRIMARY KEY AUTOINCREMENT,guild INTEGER,actor INTEGER,action TEXT,
                 details TEXT,created INTEGER)""",
+            """CREATE TABLE IF NOT EXISTS custom_panels(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,guild INTEGER,title TEXT,
+                description TEXT,active INTEGER DEFAULT 1)""",
+            """CREATE TABLE IF NOT EXISTS custom_items(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,panel_id INTEGER,label TEXT,
+                description TEXT,action_kind TEXT,action_value TEXT,emoji TEXT)""",
+            """CREATE TABLE IF NOT EXISTS promo_plans(
+                guild INTEGER,plan_key TEXT,title TEXT,price TEXT,description TEXT,
+                active INTEGER DEFAULT 1,PRIMARY KEY(guild,plan_key))""",
             "CREATE INDEX IF NOT EXISTS idx_tickets_owner ON tickets(guild,owner,kind,state)",
             "CREATE INDEX IF NOT EXISTS idx_orders_guild ON orders(guild,state,created)",
             "CREATE INDEX IF NOT EXISTS idx_reviews_guild ON reviews(guild,approved)",
@@ -174,3 +183,38 @@ class Store:
             "open_tickets":self.one("SELECT COUNT(*) n FROM tickets WHERE guild=? AND state='open'",(guild,))["n"],
             "reviews":self.one("SELECT COUNT(*) n FROM reviews WHERE guild=? AND approved=1",(guild,))["n"],
         }
+
+    def custom_panel(self,guild,pid):
+        return self.one("SELECT * FROM custom_panels WHERE guild=? AND id=? AND active=1",(guild,pid))
+
+    def custom_panels(self,guild=None):
+        if guild is None:
+            return self.many("SELECT * FROM custom_panels WHERE active=1")
+        return self.many("SELECT * FROM custom_panels WHERE guild=? AND active=1 ORDER BY id",(guild,))
+
+    def custom_items(self,pid):
+        return self.many("SELECT * FROM custom_items WHERE panel_id=? ORDER BY id",(pid,))
+
+    def create_custom_panel(self,guild,title,description):
+        cur=self.execute("INSERT INTO custom_panels(guild,title,description) VALUES (?,?,?)",
+                         (guild,title[:100],description[:1500]))
+        return cur.lastrowid
+
+    def create_custom_item(self,pid,label,description,kind,value,emoji):
+        cur=self.execute("INSERT INTO custom_items(panel_id,label,description,action_kind,action_value,emoji) VALUES (?,?,?,?,?,?)",
+                         (pid,label[:70],description[:160],kind,value[:80],emoji[:12]))
+        return cur.lastrowid
+
+    def promo_plans(self,guild):
+        from .assets import PLANS
+        rows=self.many("SELECT * FROM promo_plans WHERE guild=? AND active=1 ORDER BY plan_key",(guild,))
+        if not rows:
+            return [(k,title,detail) for k,title,detail in PLANS]
+        return [(r["plan_key"],r["title"],r["price"]+" · "+r["description"]) for r in rows]
+
+    def set_promo_plan(self,guild,key,title,price,description):
+        self.execute("""INSERT INTO promo_plans(guild,plan_key,title,price,description,active)
+            VALUES (?,?,?,?,?,1) ON CONFLICT(guild,plan_key)
+            DO UPDATE SET title=excluded.title,price=excluded.price,
+                          description=excluded.description,active=1""",
+            (guild,key,title[:50],price[:60],description[:160]))
