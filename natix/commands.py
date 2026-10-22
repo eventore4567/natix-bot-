@@ -304,14 +304,10 @@ def register(tree):
         db=i.client.store
         order=db.order(i.guild_id,id)
         if not order:return await respond(i,"Commande introuvable.")
-        if order["state"] in ("delivered","cancelled") and order["state"]!=state.value:
-            return await respond(i,"Cette commande est déjà clôturée.")
-        if state.value=="delivered" and order["state"]!="delivered":
-            if not db.deduct_stock(i.guild_id,order["product_id"],order["quantity"]):
-                return await respond(i,"Stock insuffisant, produit supprimé ou introuvable : livraison refusée.")
-        db.order_state(i.guild_id,id,state.value,i.user.id)
-        await respond(i,"✅ Commande #"+str(id)+" : "+state.value)
-        await audit(i,"order:status",str(id)+"="+state.value)
+        success,message=db.transition_order(i.guild_id,id,state.value,i.user.id)
+        await respond(i,("✅ " if success else "⚠️ ")+message)
+        if success and order["state"]!=state.value:
+            await audit(i,"order:status",str(id)+"="+state.value)
 
     @orders.command(name="details",description="Afficher les informations d'une commande")
     async def order_details(i:discord.Interaction,id:int):
