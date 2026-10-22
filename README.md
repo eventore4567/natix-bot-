@@ -53,10 +53,20 @@ Give the bot permission to manage ticket channels, send messages, read history, 
 
 ## Build your own panels
 - /custom create: choose a title and long description.
+- /custom edit: update the title and description of an existing panel.
 - /custom item: add a right-side button with a label, description, emoji and action (open a ticket or product category).
+- /custom items: list button IDs and their destinations.
+- /custom button_edit: change button text, destination, and emoji.
+- /custom button_remove: disable an old button action.
+- /custom preview: privately check the final appearance before publishing.
 - /custom publish: post the panel to a channel with the NATIX banner.
 - /custom list: find panel IDs and number of buttons.
 - /custom remove: disable a panel and its old buttons.
 - /promoplan set, /promoplan list, /promoplan disable: customize promotion prices and descriptions.
 
 Custom panels and their button mappings are stored in SQLite and re-registered after a restart. Pasting custom text into a command does not install any executable code.
+
+## Inventory safety and full catalog
+The public product menu shows six products per page with Previous and Next buttons. Orders start as pending. Staff uses the guarded state progression pending -> accepted -> processing -> delivered; canceling is available before delivery. Stock is debited exactly once inside the same SQLite transaction as delivery. If Discord rejects private ticket creation, no new order is recorded. Add a persistent Railway volume at /data before deploying a live shop.
+
+The /diagnostic command checks the guild setup, role/channel permissions, optional privileged intents, and the database connection. To place original custom icons in a personalized panel, first run /emojis, then use emoji names such as nx_shop, nx_gift, nx_support, or nx_ticket for the custom button.
