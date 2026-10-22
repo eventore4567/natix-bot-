@@ -79,7 +79,7 @@ class Panel(ui.LayoutView):
                 "Décris ce que tu proposes et ce que tu cherches dans ton ticket."))
             frame.add_item(sep())
             frame.add_item(ui.ActionRow(
-                ActionButton("Start a Trade","ticket:trade",server_emoji(guild,"trade","🔄"),discord.ButtonStyle.primary),
+                ActionButton("Start a Trade","trade:start",server_emoji(guild,"trade","🔄"),discord.ButtonStyle.primary),
                 ActionButton("Previous Trades","trade:history","🕒"),
             ))
             frame.add_item(txt("-# Les échanges ne sont pas exécutés automatiquement."))
