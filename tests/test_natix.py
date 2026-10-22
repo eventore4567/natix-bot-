@@ -335,11 +335,14 @@ class PanelTests(unittest.TestCase):
         self.db.create_ticket(9, GUILD, 5, "support", 4, subject="> test")
         check_view(self, H.render_ticket(self.db, self.db.ticket(9)))
 
-    def test_pplme_is_plain_text_not_a_payment_panel(self):
+    def test_pplme_is_plain_text_and_old_paypal_panel_is_preserved(self):
         from natix.config import PANEL_KINDS
         from natix.commands import paypal_contact_message
-        self.assertNotIn("paypal", PANEL_KINDS)
-        self.assertNotIn("paypal", V.PANEL_BUILDERS)
+        self.assertEqual(PANEL_KINDS["paypal"], "PayPal / Paiement")
+        self.assertIn("paypal", V.PANEL_BUILDERS)
+        panel,files=V.PANEL_BUILDERS["paypal"](self.db,GUILD)
+        check_view(self,panel)
+        self.assertTrue(files)
         self.assertIsNone(paypal_contact_message({}))
         self.assertIsNone(paypal_contact_message({"paypal": "natixshop"}))
         self.assertIsNone(paypal_contact_message(
