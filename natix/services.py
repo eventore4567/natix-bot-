@@ -56,7 +56,8 @@ async def create_ticket(i,kind,details=""):
         if details:
             await channel.send("**Nouvelle demande** · "+safe(details,800),
                                allowed_mentions=discord.AllowedMentions.none())
-        return await respond(i,"Tu possèdes déjà un ticket : "+channel.mention)
+        await respond(i,"Tu possèdes déjà un ticket : "+channel.mention)
+        return channel
     if not i.response.is_done():
         await i.response.defer(thinking=True,ephemeral=True)
     allow={
@@ -81,7 +82,8 @@ async def create_ticket(i,kind,details=""):
              +("\n\n"+safe(details,1800) if details else ""),
             allowed_mentions=discord.AllowedMentions.none())
         await audit(i,"ticket:open",str(chan.id)+" / "+kind)
-        return await respond(i,"✅ Ticket ouvert : "+chan.mention)
+        await respond(i,"✅ Ticket ouvert : "+chan.mention)
+        return chan
     except discord.Forbidden:
         return await respond(i,"Je n'ai pas la permission de créer les salons de tickets.")
     except discord.HTTPException:
@@ -150,11 +152,19 @@ class BuyModal(ui.Modal,title="✦ Commander sur NATIX"):
             return await respond(i,"Produit indisponible ou stock insuffisant.")
         if not db.settings(i.guild_id)["staff"]:
             return await respond(i,"Le service n'a pas encore été configuré avec /setup.")
-        order_id=db.create_order(i.guild_id,i.user.id,product,number,self.notes.value)
-        details=("**Commande #"+str(order_id)+"**\nProduit : "+safe(product["name"],100)
+        details=("**Commande NATIX**\nProduit : "+safe(product["name"],100)
                  +"\nQuantité : "+str(number)+"\nPrix affiché : "+safe(product["price"],50)
                  +"\nDétails : "+safe(self.notes.value,400))
-        await create_ticket(i,"order",details)
+        # Create or find the private ticket before recording the order. Failed
+        # channel permissions must not generate a phantom unpaid order.
+        channel=await create_ticket(i,"order",details)
+        if channel is None:
+            return
+        order_id=db.create_order(i.guild_id,i.user.id,product,number,self.notes.value)
+        db.attach_order_ticket(i.guild_id,order_id,channel.id)
+        await channel.send("📦 **Commande NATIX #"+str(order_id)+" enregistrée**\n"
+                           "Le staff doit accepter la commande avant la préparation.",
+                           allowed_mentions=discord.AllowedMentions.none())
         await audit(i,"order:created",str(order_id))
 
 class TradeModal(ui.Modal,title="✦ Commencer un échange"):
