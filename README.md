@@ -1,72 +1,45 @@
-# NATIX — Premium Discord Marketplace
+# NATIX SHOP — simple boutique Discord
 
-NATIX is a shop-only Discord bot. This repository has been rewritten into separate Python modules instead of the former Natix AI bot and old anti-bot code.
+Ce bot est une **boutique Discord** indépendante de SentriX. La navigation reprend les rubriques des captures de référence : Accueil, Boutique, Support, Giveaways, Statistiques, Réseaux, Règlement.
 
-## Architecture
-- main.py: Railway entrypoint.
-- natix/bot.py: Discord client, persistent views, command sync, scheduled giveaways.
-- natix/db.py: SQLite inventory, tickets, orders, reviews and per-server settings.
-- natix/assets.py: original monochrome NATIX banners and custom icons generated with Pillow.
-- natix/panels.py: separate native Discord Components V2 panels with accessory buttons on the right.
-- natix/services.py: ticket handling, orders, giveaways, transcripts and modals.
-- natix/commands.py: shop and administrative slash commands.
-- .github/workflows/smoke.yml: automated checks.
+## Seulement 9 commandes principales
 
-## Separate premium panels
-/shop, /support, /trade, /promo, /rules, /supporter, /reviews, /vouch, /faq, /partners, /statistics.
+- /home : accueil NATIX et panneaux de services
+- /shop : catégories Nitro Boost, Décorations, Server Boost, Custom Bots et Fastfood
+- /support : tickets, signalements et candidatures
+- /giveaway : panneau avec les concours actifs
+- /stats : chiffres réels de la boutique
+- /social : liens officiels configurés
+- /rules : règlement affiché sur un panneau
+- /setup : rôle staff, catégorie tickets, salon de transcripts privé
+- /manage : regroupement de la gestion (produits, stocks, commandes, concours, liens, règlement, archivage)
 
-Use /panel to choose where to publish a panel, or /preview to test one privately.
+Les autres systèmes (commandes, tickets, échange et promotion) fonctionnent via **boutons et menus dans les panneaux** au lieu d'ajouter des commandes slash inutiles.
 
-## Product and order administration
-/product add, /product edit, /product remove, /product restock, /product list.
-/order mine, /order details, /order list, /order status.
-/ticket close, /ticket reopen, /ticket transcript, /ticket delete.
+La commande /emojis est supprimée et le générateur d'emojis personnalisés n'est plus proposé.
 
-## Customization
-/setup, /brand, /banner, /emojis, /textconfig, /settings, /supporter_config, /announcement.
+## Première installation
 
-## Promotions and giveaways
-/promo publishes example plans requiring staff approval. No automated mass mentions.
-/giveaway starts a giveaway; /giveaway_end closes it; /giveaway_reroll picks another entrant.
-/vouches queue and /vouches approve moderate actual written customer testimonials.
+1. Exécuter /setup avec le rôle staff, la catégorie tickets et le salon de logs **privé**.
+2. Ajouter des articles avec /manage add, puis vérifier avec /manage products.
+3. Publier /home, /shop et /support dans les salons appropriés.
+4. Créer les concours avec /manage giveaway, afficher le panneau /giveaway.
+5. Configurer les réseaux avec /manage social. Modifier le règlement avec /manage rules.
 
-## Railway deployment
-Start command is python main.py (see railway.json).
-Environment variables:
-- DISCORD_TOKEN: required bot token.
-- DISCORD_GUILD_ID: optional single-guild slash sync for fast testing.
-- NATIX_DB_PATH: defaults to /data/natix.sqlite when the /data directory is present.
-- NATIX_MEMBERS_INTENT=1: optional, enable Server Members Intent in Discord Portal too.
-- NATIX_PRESENCES_INTENT=1: optional, enable Presence Intent in Discord Portal too.
+## Conception
 
-Attach a persistent Railway volume at /data to preserve database across builds/redeploys.
-Give the bot permission to manage ticket channels, send messages, read history, assign supporter roles, and manage expressions for custom emoji creation. Configure /setup before opening tickets.
+- Bandeau NATIX 1400×420 noir, gris et blanc, avec lettrage vectoriel central lisible à grande taille. Il ne dépend d'aucune police externe sur Railway.
+- Discord Components V2 : MediaGallery, Container, Section, Select, boutons latéraux.
+- Les commandes admin exigent la permission Gérer le serveur. Les tickets et commandes sont privés.
+- Pas de paiements automatiques, pas de pings massifs et pas de gains fictifs.
+- Pas de génération d'emojis personnalisés.
+- /manage delete_ticket archive le transcript complet dans le salon de logs privé avant suppression.
+- La suppression des anciennes commandes **globales** se fait pendant la synchronisation au démarrage. Les anciennes commandes propres à un serveur sont également nettoyées. Il peut être nécessaire de relancer Discord pour rafraîchir l'affichage local.
 
-## Important limitations
-- Prices in promotion panels are example placeholders, not real payment products. Payments and product delivery require staff validation in tickets.
-- No automatic payments, crypto transfers, voucher payments or mass pings.
-- The custom supporter status check is available only with authorized Presence Intent; time-based supporter credit/rewards are not implemented.
-- Transcripts export all messages still available in the Discord channel history, with attachment URLs; already deleted messages cannot be reconstructed.
-- Original emoji pack is generated with /emojis; failures are reported if permissions or server emoji slots are insufficient.
-- Passing automated tests does not replace acceptance testing against a live Discord server.
+## Railway
 
+Variables : DISCORD_TOKEN requis ; DISCORD_GUILD_ID facultatif. Base SQLite persistante dans /data/natix.sqlite grâce au volume Railway déjà configuré. Démarrage : python main.py.
 
-## Build your own panels
-- /custom create: choose a title and long description.
-- /custom edit: update the title and description of an existing panel.
-- /custom item: add a right-side button with a label, description, emoji and action (open a ticket or product category).
-- /custom items: list button IDs and their destinations.
-- /custom button_edit: change button text, destination, and emoji.
-- /custom button_remove: disable an old button action.
-- /custom preview: privately check the final appearance before publishing.
-- /custom publish: post the panel to a channel with the NATIX banner.
-- /custom list: find panel IDs and number of buttons.
-- /custom remove: disable a panel and its old buttons.
-- /promoplan set, /promoplan list, /promoplan disable: customize promotion prices and descriptions.
+L'ancien code IA, ses commandes et sa clé OpenAI ne sont plus utilisés par cette version boutique. Retirer les variables obsolètes si elles ne servent plus à aucun autre service et renouveler les secrets potentiellement exposés.
 
-Custom panels and their button mappings are stored in SQLite and re-registered after a restart. Pasting custom text into a command does not install any executable code.
-
-## Inventory safety and full catalog
-The public product menu shows six products per page with Previous and Next buttons. Orders start as pending. Staff uses the guarded state progression pending -> accepted -> processing -> delivered; canceling is available before delivery. Stock is debited exactly once inside the same SQLite transaction as delivery. If Discord rejects private ticket creation, no new order is recorded. Add a persistent Railway volume at /data before deploying a live shop.
-
-The /diagnostic command checks the guild setup, role/channel permissions, optional privileged intents, and the database connection. To place original custom icons in a personalized panel, first run /emojis, then use emoji names such as nx_shop, nx_gift, nx_support, or nx_ticket for the custom button.
+GitHub Actions vérifie la syntaxe, l'interface, la taille réelle du logo, les permissions, les commandes utiles et les transitions de stocks.
