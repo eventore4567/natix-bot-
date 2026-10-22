@@ -5,7 +5,7 @@
 /product   ajouter, modifier, réapprovisionner, retirer, lister les produits
 /giveaway  lancer, terminer, relancer un tirage
 /orders    suivre les commandes clients
-/pplme     afficher en texte le pseudo et l’email PayPal configurés
+/pplme     afficher la bannière et les coordonnées PayPal configurées
 """
 import logging
 import time
@@ -117,23 +117,25 @@ def register(tree: app_commands.CommandTree):
                                       allowed_mentions=NO_PINGS)
 
     # -------------------------------------------------------------- /pplme
-    @tree.command(name="pplme", description="Afficher le pseudo et l'email PayPal NATIX")
+    @tree.command(name="pplme", description="Afficher le PayPal NATIX avec sa bannière")
     @app_commands.guild_only()
     @staff_only()
-    @app_commands.describe(salon="Facultatif : publier dans un autre salon")
+    @app_commands.describe(salon="Facultatif : publier le panneau dans un autre salon")
     async def pplme(i: discord.Interaction, salon: discord.TextChannel = None):
-        message=paypal_contact_message(i.client.store.settings(i.guild_id))
+        message = paypal_contact_message(i.client.store.settings(i.guild_id))
         if not message:
-            return await reply(i,"Configure ton pseudo PayPal et ton email dans /setup → Paiements.")
-        destination=salon or i.channel
-        if destination==i.channel:
-            # Intentionally plain public text: no banner, embed, or panel.
-            return await i.response.send_message(message,allowed_mentions=NO_PINGS)
-        perms=destination.permissions_for(i.guild.me)
-        if not (perms.view_channel and perms.send_messages):
-            return await reply(i,"NATIX ne peut pas envoyer de message dans ce salon.")
-        await destination.send(message,allowed_mentions=NO_PINGS)
-        await reply(i,f"Informations PayPal publiées dans {destination.mention}.")
+            return await reply(i,"Configure ton pseudo et ton email dans /setup → Paiements.")
+        destination = salon or i.channel
+        perms = destination.permissions_for(i.guild.me)
+        if not (perms.view_channel and perms.send_messages and perms.attach_files):
+            return await reply(i,"NATIX ne peut pas publier la bannière dans ce salon.")
+        view, files = V.pplme_panel(i.client.store, i.guild_id, message)
+        if destination.id == i.channel_id:
+            return await i.response.send_message(
+                view=view, files=files, allowed_mentions=NO_PINGS
+            )
+        await destination.send(view=view, files=files, allowed_mentions=NO_PINGS)
+        await reply(i,f"Panneau PayPal publié dans {destination.mention}.")
 
 
     # -------------------------------------------------------------- /panel    # -------------------------------------------------------------- /panel
