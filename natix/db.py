@@ -101,6 +101,16 @@ class Store:
                              (guild,category,limit))
         return self.many("SELECT * FROM products WHERE guild=? AND active=1 ORDER BY id DESC LIMIT ?",(guild,limit))
 
+    def products_page(self,guild,category,page=0,page_size=6):
+        page=max(0,min(int(page),10000))
+        page_size=max(1,min(int(page_size),8))
+        rows=self.many("""SELECT * FROM products WHERE guild=? AND category=? AND active=1
+            ORDER BY id DESC LIMIT ? OFFSET ?""",
+            (guild,category,page_size,page*page_size))
+        total=self.one("""SELECT COUNT(*) AS n FROM products
+            WHERE guild=? AND category=? AND active=1""",(guild,category))["n"]
+        return rows,total
+
     def product(self,guild,pid):
         return self.one("SELECT * FROM products WHERE guild=? AND id=? AND active=1",(guild,pid))
 
