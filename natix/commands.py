@@ -169,6 +169,31 @@ def register(tree):
             "\nLogs : "+str(c["logs"])+"\nCouleur : #"+c["color"]+
             "\nNom : "+safe(c["name"])+"\nSupporter : "+str(c["supporter_role"]))
 
+    @tree.command(name="diagnostic",description="Vérifier les permissions, la boutique et les données NATIX")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def cmd_diagnostic(i:discord.Interaction):
+        settings=i.client.store.settings(i.guild_id)
+        me=i.guild.me
+        perm=me.guild_permissions if me else None
+        tests=[
+            ("Salon des tickets",bool(i.guild.get_channel(settings["category"]))),
+            ("Rôle du staff",bool(i.guild.get_role(settings["staff"]))),
+            ("Création de salons",bool(perm and perm.manage_channels)),
+            ("Envoi de messages",bool(perm and perm.send_messages)),
+            ("Lecture de l'historique",bool(perm and perm.read_message_history)),
+            ("Gestion des rôles",bool(perm and perm.manage_roles)),
+            ("Intents membres",bool(i.client.intents.members)),
+            ("Intents présences (statut)",bool(i.client.intents.presences))
+        ]
+        try:
+            i.client.store.one("SELECT 1 AS ok")
+            tests.append(("Base de données",True))
+        except Exception:
+            tests.append(("Base de données",False))
+        rows=["## NATIX • Diagnostic"]+[
+            ("✅ " if valid else "⚠️ ")+label for label,valid in tests]
+        rows+=["\n-# Les intents optionnels sont nécessaires uniquement aux fonctions qui les utilisent."]
+        await respond(i,"\n".join(rows))
     @tree.command(name="textconfig",description="Personnaliser les conditions, FAQ ou partenaires")
     @app_commands.checks.has_permissions(manage_guild=True)
     @app_commands.choices(type=[
