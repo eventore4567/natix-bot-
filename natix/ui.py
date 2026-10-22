@@ -333,12 +333,24 @@ def pplme_panel(store, guild_id, contact):
     """
     settings = store.settings(guild_id)
     name = safe(settings["name"], 40)
-    view = view_of(container(
+    email = (settings.get("paypal_email") or "").strip()
+    # Discord bots cannot write a user's clipboard. A code block supplies
+    # Discord's own copy affordance, with a button to display it privately.
+    items = [
         *header("shop", settings, f"## {E('nx_dollar')} PayPal · {name}",
                 "Nos coordonnées PayPal officielles."),
         ui.Separator(),
         ui.TextDisplay("### Informations PayPal\n" + contact),
-    ))
+    ]
+    if email:
+        items.extend([
+            ui.Separator(),
+            ui.TextDisplay("**E-mail à copier :**\n```text\n" + safe(email, 160) + "\n```"),
+            ui.ActionRow(ui.Button(
+                label="📋 Copier l'e-mail", custom_id="nx:ppl:copy",
+                style=discord.ButtonStyle.secondary)),
+        ])
+    view = view_of(container(*items))
     return view, files_for("shop", settings)
 
 
