@@ -327,33 +327,26 @@ def social_panel(store, guild_id):
 
 
 def pplme_panel(store, guild_id, contact):
-    """Compact NATIX PayPal contact panel with the same banner as the shop.
+    """Compact NATIX panel with native Discord code-block copy affordance.
 
-    Different from the full /panel PayPal guide: only username and email.
-    No payment confirmation or price is generated outside an order ticket.
+    The bot cannot control the user clipboard. Discord can offer its
+    own one-click copy icon on a fenced email code block.
     """
     settings = store.settings(guild_id)
     name = safe(settings["name"], 40)
     email = (settings.get("paypal_email") or "").strip()
-    # Discord bots cannot write a user's clipboard. A code block supplies
-    # Discord's own copy affordance, with a button to display it privately.
-    items = [
+    username_line = contact.splitlines()[0] if contact else ""
+    valid_email = bool(re.fullmatch(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", email))
+    contact_text = "### Informations PayPal\n" + username_line
+    if valid_email:
+        contact_text += "\n**Mon mail PayPal :**\n```text\n" + email + "\n```"
+    view = view_of(container(
         *header("shop", settings, f"## {E('nx_dollar')} PayPal · {name}",
                 "Nos coordonnées PayPal officielles."),
         ui.Separator(),
-        ui.TextDisplay("### Informations PayPal\n" + contact),
-    ]
-    if re.fullmatch(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", email):
-        items.extend([
-            ui.Separator(),
-            ui.TextDisplay("**E-mail à copier :**\n```text\n" + email + "\n```"),
-            ui.ActionRow(ui.Button(
-                label="📋 Copier l'e-mail", custom_id="nx:ppl:copy",
-                style=discord.ButtonStyle.secondary)),
-        ])
-    view = view_of(container(*items))
+        ui.TextDisplay(contact_text),
+    ))
     return view, files_for("shop", settings)
-
 
 def paypal_panel(store, guild_id):
     """Public payment-information panel.
