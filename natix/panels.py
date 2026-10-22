@@ -4,6 +4,15 @@ import discord
 from discord import ui
 from .assets import CATEGORIES, PANELS, PLANS, TICKET_TYPES, safe, server_emoji
 
+def pack_containers(view, source, colour):
+    """Split Discord V2 containers: Discord permits up to 10 direct children each."""
+    items=list(source.children)
+    for offset in range(0,len(items),10):
+        box=ui.Container(accent_colour=colour)
+        for child in items[offset:offset+10]:
+            box.add_item(child)
+        view.add_item(box)
+
 def txt(text):
     return ui.TextDisplay(text)
 
@@ -149,7 +158,7 @@ class Panel(ui.LayoutView):
                                              ActionButton("Voir les avis","vouch:list","⭐")))
         else:
             frame.add_item(txt("## NATIX"))
-        self.add_item(frame)
+        pack_containers(self,frame,accent)
 
 class TicketControls(ui.LayoutView):
     def __init__(self):
@@ -180,7 +189,7 @@ class GiveawayPanel(ui.LayoutView):
 
 class CatalogView(ui.LayoutView):
     def __init__(self,products,category):
-        super().__init__(timeout=600)
+        super().__init__(timeout=None)
         box=ui.Container(accent_colour=discord.Colour(0xDDD1F2))
         label=next((name for key,name,_ in CATEGORIES if key==category),"Produits")
         box.add_item(txt("## 🛍️ "+label+"\nSélectionne un produit pour préparer ta commande."))
@@ -192,7 +201,7 @@ class CatalogView(ui.LayoutView):
             box.add_item(sep())
             box.add_item(ui.Section(txt("**"+safe(prod["name"],70)+"**\n"+
                  safe(prod["details"],120)+"\n"+price+" · "+stock),accessory=btn))
-        self.add_item(box)
+        pack_containers(self,box,discord.Colour(0xDDD1F2))
 
 
 class CustomPanel(ui.LayoutView):
@@ -212,4 +221,4 @@ class CustomPanel(ui.LayoutView):
                 txt("**"+safe(item["label"],70)+"**\n"+safe(item["description"],160)),
                 accessory=ActionButton("Ouvrir","custom:"+str(item["id"]),item["emoji"] or "🔹")))
         box.add_item(txt("-# NATIX · Panneau personnalisé"))
-        self.add_item(box)
+        pack_containers(self,box,accent)
