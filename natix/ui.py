@@ -351,7 +351,7 @@ def paypal_panel(store, guild_id):
     if paypal:
         details.append("**PayPal officiel :** " + safe(paypal, 180))
     if settings.get("paypal_email"):
-        details.append("**Email PayPal :** \`" + safe(settings["paypal_email"], 100) + "\`")
+        details.append("**Email PayPal :** `" + safe(settings["paypal_email"], 100) + "`")
     if not details:
         details.append("**PayPal non configuré.** Un administrateur doit ouvrir /setup → Paiements.")
 
