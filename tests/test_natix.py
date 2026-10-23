@@ -675,7 +675,8 @@ class FlowTests(unittest.TestCase):
 
     def test_stock_on_unlimited_is_not_silently_set_to_zero(self):
         from natix.commands import register, announce_restock
-        bot = Natix(store=self.db)
+        with patch.object(discord, "TextChannel", REAL_TEXT_CHANNEL):
+            bot = Natix(store=self.db)
         cmd = bot.tree.get_command("product").get_command("stock")
         product = self.db.add_product(GUILD, "nitro", "Illimité", "Aucune limite", 499, -1)
         i = interaction(self.client, self.guild, self.admin, "")
