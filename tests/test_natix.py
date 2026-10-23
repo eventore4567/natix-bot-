@@ -661,7 +661,7 @@ class FlowTests(unittest.TestCase):
         cfg = self.db.settings(GUILD)
         self.assertEqual(cfg["restock_channel"], 980)
         self.assertEqual(cfg["restock_ping"], "none")
-        confirmation = i.followup.send.call_args.kwargs["content"]
+        confirmation = i.followup.send.call_args.args[0]
         self.assertIn("Restock enregistré", confirmation)
         self.assertIn("<#980>", confirmation)
         refused = self.route(
