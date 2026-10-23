@@ -646,6 +646,49 @@ class FlowTests(unittest.TestCase):
             {"type": 18, "component": {"type": 7, "custom_id": "logs", "values": ["700"]}}])
         self.assertIn("privé", self.last_error(i)[0])
 
+    def test_restock_setup_validates_and_confirms_channel(self):
+        announcement = FakeChannel(980, "annonces-restock", private=False)
+        blocked = FakeChannel(981, "salon-cache", private=True)
+        self.guild.channels.update({980: announcement, 981: blocked})
+        i = self.route(
+            self.admin, "nx:cfgm:restock", modal=True,
+            message=SimpleNamespace(id=1), components=[
+                {"type": 18, "component": {"type": 7, "custom_id": "restock_channel", "values": ["980"]}},
+                {"type": 18, "component": {"type": 3, "custom_id": "restock_ping", "values": ["none"]}},
+            ]
+        )
+        self.assertEqual(self.last_error(i), [])
+        cfg = self.db.settings(GUILD)
+        self.assertEqual(cfg["restock_channel"], 980)
+        self.assertEqual(cfg["restock_ping"], "none")
+        confirmation = i.followup.send.call_args.kwargs["content"]
+        self.assertIn("Restock enregistré", confirmation)
+        self.assertIn("<#980>", confirmation)
+        refused = self.route(
+            self.admin, "nx:cfgm:restock", modal=True,
+            message=SimpleNamespace(id=1), components=[
+                {"type": 18, "component": {"type": 7, "custom_id": "restock_channel", "values": ["981"]}},
+            ]
+        )
+        self.assertIn("voir et écrire", self.last_error(refused)[0])
+        self.assertEqual(self.db.settings(GUILD)["restock_channel"], 980)
+
+    def test_stock_on_unlimited_is_not_silently_set_to_zero(self):
+        from natix.commands import register, announce_restock
+        bot = Natix(store=self.db)
+        cmd = bot.tree.get_command("product").get_command("stock")
+        product = self.db.add_product(GUILD, "nitro", "Illimité", "Aucune limite", 499, -1)
+        i = interaction(self.client, self.guild, self.admin, "")
+        run(cmd.callback(i, produit=product, quantite=5, mode=None))
+        self.assertEqual(self.db.product(GUILD, product)["stock"], -1)
+        self.assertIn("illimité", i.response.calls[0][2]["content"])
+
+        # Without announcement configuration, the restock must never fail silently.
+        no_channel = interaction(self.client, self.guild, self.admin, "")
+        result = run(announce_restock(no_channel, self.db.product(GUILD, product), 4))
+        self.assertFalse(result[0])
+        self.assertIn("/setup", result[1])
+
     def test_unconfigured_ticket_error_is_clean(self):
         self.db.configure(GUILD, category=0)
         i = self.route(self.buyer, f"nx:buym:{self.pid}", modal=True, components=text_fields(qty="1"))
@@ -720,6 +763,7 @@ class FlowTests(unittest.TestCase):
         self.guild.channels.update({950: here, 960: restock})
         self.guild.me.guild_permissions = SimpleNamespace(manage_guild=True, administrator=True)
         self.db.configure(GUILD, restock_channel=960, restock_ping="everyone")
+        self.client.channels[950] = here  # published shop panel is cached for refresh
 
         def call(cmd, **kw):
             i = interaction(self.client, self.guild, self.admin, "", channel=here)
@@ -736,6 +780,8 @@ class FlowTests(unittest.TestCase):
         self.assertEqual(self.db.product(GUILD, pid)["price_cents"], 499)
         call(product.get_command("stock"), produit=pid, quantite=3, mode=None)
         self.assertEqual(self.db.product(GUILD, pid)["stock"], 3)
+        self.assertTrue(here.edits, "Le panneau boutique doit être rafraîchi après le restock.")
+        self.assertEqual(here.edits[-1][0], self.db.panels(GUILD, "shop")[0]["message"])
         text = restock.sent[-1].content
         self.assertIn("Restock", text)
         self.assertIn("+3", text)
