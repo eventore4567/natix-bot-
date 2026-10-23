@@ -218,18 +218,17 @@ class Store:
                 "SELECT * FROM products WHERE guild=? AND active=1 "
                 "ORDER BY category, position, id LIMIT ?", (guild, limit)
             )
-        # Escape LIKE metacharacters entered in a product name.
-        escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        # Escape LIKE wildcards with a literal SQL escape character.
+        escaped = term.replace("!", "!!").replace("%", "!%").replace("_", "!_")
         pattern = "%" + escaped + "%"
         return self.many(
             """SELECT * FROM products WHERE guild=? AND active=1
-               AND (name LIKE ? ESCAPE '\' COLLATE NOCASE
-                    OR category LIKE ? ESCAPE '\' COLLATE NOCASE
-                    OR CAST(id AS TEXT) LIKE ? ESCAPE '\')
+               AND (name LIKE ? ESCAPE '!' COLLATE NOCASE
+                    OR category LIKE ? ESCAPE '!' COLLATE NOCASE
+                    OR CAST(id AS TEXT) LIKE ? ESCAPE '!')
                ORDER BY category, position, id LIMIT ?""",
             (guild, pattern, pattern, pattern, limit)
         )
-
     def resolve_product(self, guild, reference):
         """Accept a product ID or an unambiguous product name for mobile commands.
 
