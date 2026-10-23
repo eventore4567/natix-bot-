@@ -481,21 +481,17 @@ class FlowTests(unittest.TestCase):
         self.assertIsNone(H.find_route("nx:ppl:copy"))
         self.assertEqual({f.filename for f in files}, {"natix_shop.png", "natix_logo.png"})
 
-    def test_pplme_mobile_copy_is_private_and_framed(self):
+    def test_pplme_mobile_copies_email_only(self):
         self.db.configure(GUILD, paypal="@NatixShop", paypal_email="natixshop9@gmail.com")
         i = self.route(self.buyer, "nx:ppl:mobile")
         self.assertEqual(i.response.calls[0][0], "send_message")
-        reply = i.response.calls[0][2]
-        self.assertTrue(reply["ephemeral"])
-        self.assertFalse(reply["allowed_mentions"].everyone)
-        payload = check_view(self, reply["view"])
-        self.assertEqual(payload[0]["type"], 17)
-        rendered = json.dumps(payload, ensure_ascii=False)
-        self.assertIn("NATIX", rendered)
-        self.assertIn("natixshop9@gmail.com", rendered)
-        self.assertIn("```text\nnatixshop9@gmail.com\n```", rendered.replace("\\n", "\n"))
-        self.assertIn("Appuie longuement", rendered)
-        self.assertNotIn("nx:ppl:copy", rendered)
+        result = i.response.calls[0][2]
+        self.assertTrue(result["ephemeral"])
+        self.assertFalse(result["allowed_mentions"].everyone)
+        # Long-press Copy Text on Discord mobile must copy ONLY this address:
+        self.assertEqual(result["content"], "natixshop9@gmail.com")
+        self.assertNotIn("view", result)
+        self.assertNotIn("embed", result)
         self.assertFalse(i.followup.send.called)
 
         self.db.configure(GUILD, paypal_email="")
