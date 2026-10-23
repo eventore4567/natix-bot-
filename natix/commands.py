@@ -91,7 +91,7 @@ async def announce_restock(i, product, added):
             if shop else "")
     ping = {"here": "@here ", "everyone": "@everyone "}.get(settings["restock_ping"], "")
     emoji = E(product["emoji"] or (category["emoji"] if category else "nx_box"))
-    text = (f"{ping}**NATIX · Réapprovisionnement**\n\n"
+    text = (f"{ping}**NATIX · Restock / Réapprovisionnement**\n\n"
             f"{emoji} **{safe(category['name'] if category else 'Boutique', 60)} · "
             f"{safe(product['name'], 80)}**\n**+{added}** unité(s) disponible(s){link}")
     try:
