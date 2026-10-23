@@ -405,12 +405,14 @@ async def pay_done(i, parts):
 
 
 async def ppl_mobile(i, parts):
-    """Show a discreet mobile-friendly NATIX copy card, visible only to the clicker."""
+    """Return only the PayPal email so mobile Copy Text copies nothing else."""
     email = (store_of(i).settings(i.guild_id).get("paypal_email") or "").strip()
     if not re.fullmatch(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", email):
         raise Oops("L'adresse PayPal n'est pas encore configurée.")
+    # Discord mobile's Copy Text action copies the entire message.
+    # Send ONLY the email, with no headings, Markdown fences, or instructions.
     await i.response.send_message(
-        view=V.pplme_mobile_copy_view(email),
+        content=email,
         ephemeral=True,
         allowed_mentions=NO_PINGS,
     )
