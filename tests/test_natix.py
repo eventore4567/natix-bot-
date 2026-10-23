@@ -243,6 +243,24 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(self.db.product(GUILD, pid)["stock"], 1)
         self.assertEqual(self.db.order(GUILD, oid)["total_cents"], 2000)
 
+    def test_mobile_product_search_and_id_resolution(self):
+        for n in range(215):
+            self.db.add_product(GUILD, "nitro", f"Ancien produit {n}", "", 100, 0)
+        target = self.db.add_product(GUILD, "nitro", "Nitro Mobile Unique", "", 500, 0)
+        # Search must not be limited to the first 200 product rows.
+        rows = self.db.search_products(GUILD, "Mobile Unique")
+        self.assertEqual([row["id"] for row in rows], [target])
+        self.assertEqual(self.db.resolve_product(GUILD, str(target))[0]["id"], target)
+        self.assertEqual(self.db.resolve_product(GUILD, "#" + str(target))[0]["id"], target)
+        self.assertEqual(self.db.resolve_product(GUILD, "nitro mobile unique")[0]["id"], target)
+        self.assertEqual(self.db.resolve_product(GUILD, "Mobile Unique")[0]["id"], target)
+        self.assertIn("/product add", self.db.resolve_product(GUILD, "Inexistant")[1])
+        self.assertEqual(self.db.search_products(GUILD, "anything", 100), [])
+        self.assertLessEqual(len(self.db.search_products(GUILD, "")), 25)
+        self.assertIsNone(self.db.resolve_product(GUILD + 99, str(target))[0])
+        dup = self.db.add_product(GUILD, "nitro", "Nitro Mobile Unique", "", 300, 0)
+        self.assertIn("Plusieurs", self.db.resolve_product(GUILD, "Nitro Mobile Unique")[1])
+
     def test_unlimited_stock(self):
         pid = self.db.add_product(GUILD, "bots", "Bot", "", 500, -1)
         oid, _ = self.db.create_order(GUILD, 5, pid, 50)
@@ -668,6 +686,28 @@ class FlowTests(unittest.TestCase):
         )
         self.assertIn("voir et écrire", self.last_error(refused)[0])
         self.assertEqual(self.db.settings(GUILD)["restock_channel"], 980)
+
+    def test_stock_mobile_allows_names_when_autocomplete_is_empty(self):
+        from natix.commands import ac_stock_product
+        with patch.object(discord, "TextChannel", REAL_TEXT_CHANNEL):
+            bot = Natix(store=self.db)
+        cmd = bot.tree.get_command("product").get_command("stock")
+        self.assertEqual(cmd._params["produit"].type, discord.AppCommandOptionType.string)
+        products = run(ac_stock_product(SimpleNamespace(client=self.client, guild_id=GUILD), "Nitro"))
+        self.assertTrue(products)
+        self.assertEqual(products[0].value, str(self.pid))
+        missing = run(ac_stock_product(SimpleNamespace(client=self.client, guild_id=GUILD), "nexistepas"))
+        self.assertIn("/product add", missing[0].name)
+
+        i = interaction(self.client, self.guild, self.admin, "")
+        run(cmd.callback(i, produit="Nitro Boost 1M", quantite=4, mode=None))
+        self.assertEqual(self.db.product(GUILD, self.pid)["stock"], 6)
+        i2 = interaction(self.client, self.guild, self.admin, "")
+        run(cmd.callback(i2, produit="#" + str(self.pid), quantite=1, mode=None))
+        self.assertEqual(self.db.product(GUILD, self.pid)["stock"], 7)
+        missing_selection = interaction(self.client, self.guild, self.admin, "")
+        run(cmd.callback(missing_selection, produit="__none__", quantite=1, mode=None))
+        self.assertIn("/product add", missing_selection.response.calls[0][2]["content"])
 
     def test_stock_on_unlimited_is_not_silently_set_to_zero(self):
         from natix.commands import register, announce_restock

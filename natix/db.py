@@ -205,6 +205,60 @@ class Store:
         return self.many("SELECT * FROM products WHERE guild=? AND active=1 ORDER BY category, position, id LIMIT ?",
                          (guild, limit))
 
+    def search_products(self, guild, query="", limit=25):
+        """Search every active product, not just the first 200 from /product list.
+
+        Case-insensitive names and category, plus partial numeric product IDs.
+        Result count stays within Discord's 25-choice autocomplete limit.
+        """
+        limit = max(1, min(int(limit), 25))
+        term = str(query or "").strip().lstrip("#")
+        if not term:
+            return self.many(
+                "SELECT * FROM products WHERE guild=? AND active=1 "
+                "ORDER BY category, position, id LIMIT ?", (guild, limit)
+            )
+        # Escape LIKE wildcards with a literal SQL escape character.
+        escaped = term.replace("!", "!!").replace("%", "!%").replace("_", "!_")
+        pattern = "%" + escaped + "%"
+        return self.many(
+            """SELECT * FROM products WHERE guild=? AND active=1
+               AND (name LIKE ? ESCAPE '!' COLLATE NOCASE
+                    OR category LIKE ? ESCAPE '!' COLLATE NOCASE
+                    OR CAST(id AS TEXT) LIKE ? ESCAPE '!')
+               ORDER BY category, position, id LIMIT ?""",
+            (guild, pattern, pattern, pattern, limit)
+        )
+    def resolve_product(self, guild, reference):
+        """Accept a product ID or an unambiguous product name for mobile commands.
+
+        Returns (product, error), never picks an ambiguous name silently.
+        """
+        reference = str(reference or "").strip()
+        if reference.startswith("#"):
+            reference = reference[1:].strip()
+        if not reference or reference.startswith("__"):
+            return None, "Aucun produit sélectionné. Crée un article avec /product add."
+        if reference.isdecimal():
+            row = self.product(guild, int(reference))
+            return (row, None) if row else (
+                None, "Produit introuvable. Vérifie son identifiant avec /product list."
+            )
+        exact = self.many(
+            "SELECT * FROM products WHERE guild=? AND active=1 "
+            "AND name=? COLLATE NOCASE LIMIT 2", (guild, reference)
+        )
+        if len(exact) == 1:
+            return exact[0], None
+        if len(exact) > 1:
+            return None, "Plusieurs produits portent ce nom. Utilise l'identifiant #ID."
+        matches = self.search_products(guild, reference, limit=2)
+        if len(matches) == 1:
+            return matches[0], None
+        if matches:
+            return None, "Plusieurs produits correspondent. Précise le nom ou utilise le numéro #ID."
+        return None, "Aucun produit trouvé. Utilise /product list ou crée-le avec /product add."
+
     def product(self, guild, pid):
         return self.one("SELECT * FROM products WHERE guild=? AND id=? AND active=1", (guild, pid))
 
