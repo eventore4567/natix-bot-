@@ -44,15 +44,36 @@ async def ac_category(i, current):
             if cur in c["name"].lower() or cur in c["key"]][:25]
 
 
-async def ac_product(i, current):
-    cur = current.lower()
-    s = i.client.store.settings(i.guild_id)
+def product_choices(rows, settings, string_values=False):
+    """Short labels show the ID, product name and remaining stock on phones."""
     out = []
-    for p in i.client.store.products(i.guild_id, limit=200):
-        label = f"#{p['id']} · {p['name']} · {money(p['price_cents'], s['currency'])} · {stock_text(p['stock'])}"
-        if cur in label.lower():
-            out.append(app_commands.Choice(name=label[:100], value=p["id"]))
-    return out[:25]
+    for p in rows:
+        label = f"#{p['id']} · {p['name']} · {stock_text(p['stock'])}"
+        out.append(app_commands.Choice(
+            name=label[:100],
+            value=str(p["id"]) if string_values else p["id"]
+        ))
+    return out
+
+
+async def ac_product(i, current):
+    # Edit and remove still use numeric IDs; search all DB rows on demand.
+    return product_choices(
+        i.client.store.search_products(i.guild_id, current),
+        i.client.store.settings(i.guild_id),
+    )
+
+
+async def ac_stock_product(i, current):
+    # String autocomplete lets Discord mobile users TYPE an ID or name directly
+    # if its search/dropdown is unavailable.
+    rows = i.client.store.search_products(i.guild_id, current)
+    if not rows:
+        return [app_commands.Choice(
+            name="Aucun produit trouvé · /product add pour en créer un",
+            value="__none__"
+        )]
+    return product_choices(rows, i.client.store.settings(i.guild_id), string_values=True)
 
 
 async def ac_giveaway(i, current):
@@ -218,17 +239,18 @@ def register(tree: app_commands.CommandTree):
 
     @product.command(name="stock", description="Réapprovisionner ou corriger le stock")
     @staff_only()
-    @app_commands.autocomplete(produit=ac_product)
-    @app_commands.describe(produit="Produit", quantite="Quantité", mode="Ajouter au stock ou le remplacer")
+    @app_commands.autocomplete(produit=ac_stock_product)
+    @app_commands.describe(produit="Nom ou identifiant du produit (sélection ou saisie directe)", quantite="Quantité", mode="Ajouter au stock ou le remplacer")
     @app_commands.choices(mode=[app_commands.Choice(name="Ajouter (restock)", value="add"),
                                 app_commands.Choice(name="Définir la valeur exacte", value="set"),
                                 app_commands.Choice(name="Rendre illimité", value="unlimited")])
-    async def p_stock(i: discord.Interaction, produit: int, quantite: app_commands.Range[int, 0, 100000] = 0,
+    async def p_stock(i: discord.Interaction, produit: str, quantite: app_commands.Range[int, 0, 100000] = 0,
                       mode: app_commands.Choice[str] = None):
         store = i.client.store
-        p = store.product(i.guild_id, produit)
-        if not p:
-            return await reply(i, "Produit introuvable.")
+        p, problem = store.resolve_product(i.guild_id, produit)
+        if p is None:
+            return await reply(i, problem)
+        produit = p["id"]
         how = mode.value if mode else "add"
         before = p["stock"]
         if how == "unlimited":
