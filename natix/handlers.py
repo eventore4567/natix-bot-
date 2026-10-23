@@ -404,6 +404,18 @@ async def pay_done(i, parts):
                                                                   roles=[staff] if staff else False))
 
 
+async def ppl_mobile(i, parts):
+    """Show a discreet mobile-friendly NATIX copy card, visible only to the clicker."""
+    email = (store_of(i).settings(i.guild_id).get("paypal_email") or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", email):
+        raise Oops("L'adresse PayPal n'est pas encore configurée.")
+    await i.response.send_message(
+        view=V.pplme_mobile_copy_view(email),
+        ephemeral=True,
+        allowed_mentions=NO_PINGS,
+    )
+
+
 # ====================================================================== commandes (orders)
 async def ord_action(i, parts):
     require_staff(i)
@@ -936,6 +948,7 @@ ROUTES = [
     (r"^nx:buym:\d+$", buy_submit),
     (r"^nx:ord:\w+:\d+$", ord_action),
     (r"^nx:pay:done$", pay_done),
+    (r"^nx:ppl:mobile$", ppl_mobile),
     (r"^nx:sup:kind$", support_kind),
     (r"^nx:supm:\w+$", support_submit),
     (r"^nx:trade:start$", trade_start),
