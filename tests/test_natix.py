@@ -390,6 +390,9 @@ class PanelTests(unittest.TestCase):
         self.assertIn("natixshop9@gmail.com", serialized)
         self.assertNotIn("nx:ppl:copy", serialized)
         self.assertNotIn("Copier l'e-mail", serialized)
+        self.assertIn("nx:ppl:mobile", serialized)
+        self.assertIn("Copier sur mobile", serialized)
+        self.assertIs(H.find_route("nx:ppl:mobile"), H.ppl_mobile)
         self.assertIn("```text\\n" + configured["paypal_email"] + "\\n```", serialized)
         self.assertIsNone(H.find_route("nx:ppl:copy"))
         self.assertNotIn("Comment payer", serialized)
@@ -477,6 +480,27 @@ class FlowTests(unittest.TestCase):
         self.assertNotIn("nx:ppl:copy",data)
         self.assertIsNone(H.find_route("nx:ppl:copy"))
         self.assertEqual({f.filename for f in files}, {"natix_shop.png", "natix_logo.png"})
+
+    def test_pplme_mobile_copy_is_private_and_framed(self):
+        self.db.configure(GUILD, paypal="@NatixShop", paypal_email="natixshop9@gmail.com")
+        i = self.route(self.buyer, "nx:ppl:mobile")
+        self.assertEqual(i.response.calls[0][0], "send_message")
+        reply = i.response.calls[0][2]
+        self.assertTrue(reply["ephemeral"])
+        self.assertFalse(reply["allowed_mentions"].everyone)
+        payload = check_view(self, reply["view"])
+        self.assertEqual(payload[0]["type"], 17)
+        rendered = json.dumps(payload, ensure_ascii=False)
+        self.assertIn("NATIX", rendered)
+        self.assertIn("natixshop9@gmail.com", rendered)
+        self.assertIn("```text\nnatixshop9@gmail.com\n```", rendered.replace("\\n", "\n"))
+        self.assertIn("Appuie longuement", rendered)
+        self.assertNotIn("nx:ppl:copy", rendered)
+        self.assertFalse(i.followup.send.called)
+
+        self.db.configure(GUILD, paypal_email="")
+        invalid = self.route(self.buyer, "nx:ppl:mobile")
+        self.assertIn("pas encore configurée", self.last_error(invalid)[0])
 
     def test_full_order_flow(self):
         i = self.route(self.buyer, "nx:shop:cat", values=["nitro"], message=SimpleNamespace(id=1))
