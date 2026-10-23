@@ -340,13 +340,42 @@ def pplme_panel(store, guild_id, contact):
     contact_text = "### Informations PayPal\n" + username_line
     if valid_email:
         contact_text += "\n**Mon mail PayPal :**\n```text\n" + email + "\n```"
-    view = view_of(container(
+    items = [
         *header("shop", settings, f"## {E('nx_dollar')} PayPal · {name}",
                 "Nos coordonnées PayPal officielles."),
         ui.Separator(),
         ui.TextDisplay(contact_text),
-    ))
+    ]
+    if valid_email:
+        items.extend([
+            ui.Separator(),
+            ui.Section(
+                ui.TextDisplay("**Sur téléphone**\nAccède à une version simple à sélectionner et copier."),
+                accessory=ui.Button(
+                    label="Copier sur mobile",
+                    emoji="📱",
+                    custom_id="nx:ppl:mobile",
+                    style=discord.ButtonStyle.secondary,
+                ),
+            ),
+        ])
+    view = view_of(container(*items))
     return view, files_for("shop", settings)
+
+def pplme_mobile_copy_view(email):
+    """Private, visually integrated mobile copy helper.
+
+    Discord buttons cannot access the clipboard. On mobile the user can
+    long-press the address and choose Copy.
+    """
+    return view_of(ui.Container(
+        ui.TextDisplay("## 📋 NATIX · Copier l'e-mail"),
+        ui.Separator(),
+        ui.TextDisplay("**Adresse PayPal**\n```text\n" + email + "\n```"),
+        ui.TextDisplay("-# 📱 Appuie longuement sur l'adresse, puis sélectionne « Copier »."),
+        accent_colour=discord.Colour(0x9E9DA9),
+    ))
+
 
 def paypal_panel(store, guild_id):
     """Public payment-information panel.
