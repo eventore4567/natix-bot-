@@ -350,7 +350,7 @@ def pplme_panel(store, guild_id, contact):
         items.extend([
             ui.Separator(),
             ui.Section(
-                ui.TextDisplay("**Sur téléphone**\nAccède à une version simple à sélectionner et copier."),
+                ui.TextDisplay("**Sur téléphone**\nAffiche uniquement l’e-mail pour le copier sans le reste du panneau."),
                 accessory=ui.Button(
                     label="Copier sur mobile",
                     emoji="📱",
@@ -361,21 +361,6 @@ def pplme_panel(store, guild_id, contact):
         ])
     view = view_of(container(*items))
     return view, files_for("shop", settings)
-
-def pplme_mobile_copy_view(email):
-    """Private, visually integrated mobile copy helper.
-
-    Discord buttons cannot access the clipboard. On mobile the user can
-    long-press the address and choose Copy.
-    """
-    return view_of(ui.Container(
-        ui.TextDisplay("## 📋 NATIX · Copier l'e-mail"),
-        ui.Separator(),
-        ui.TextDisplay("**Adresse PayPal**\n```text\n" + email + "\n```"),
-        ui.TextDisplay("-# 📱 Appuie longuement sur l'adresse, puis sélectionne « Copier »."),
-        accent_colour=discord.Colour(0x9E9DA9),
-    ))
-
 
 def paypal_panel(store, guild_id):
     """Public payment-information panel.
