@@ -19,7 +19,7 @@ from . import ui as V
 from .config import ORDER_STATES, PANEL_KINDS
 from .db import parse_price
 from .emojis import EMOJIS
-from .handlers import finish_giveaway
+from .handlers import finish_giveaway, refresh_panels
 from .paypal import paypal_username
 from .util import NO_PINGS, is_staff, money, parse_duration, reply, safe, stock_text
 
@@ -66,24 +66,43 @@ async def ac_giveaway(i, current):
 
 
 async def announce_restock(i, product, added):
+    """Best-effort restock announcement; always report success/failure to staff."""
     store = i.client.store
-    s = store.settings(i.guild_id)
-    channel = i.guild.get_channel(s.get("restock_channel") or 0)
+    settings = store.settings(i.guild_id)
+    channel_id = settings.get("restock_channel") or 0
+    if not channel_id:
+        return False, "Annonce non envoyée : configure un salon dans /setup → Restock."
+    channel = i.guild.get_channel(channel_id)
+    if channel is None and hasattr(i.guild, "fetch_channel"):
+        try:
+            channel = await i.guild.fetch_channel(channel_id)
+        except (discord.Forbidden, discord.NotFound, discord.HTTPException):
+            LOG.warning("Salon restock %s inaccessible sur %s", channel_id, i.guild_id)
     if not isinstance(channel, discord.TextChannel):
-        return
-    cat = store.category(i.guild_id, product["category"])
+        return False, "Annonce non envoyée : salon restock inaccessible ou supprimé."
+
+    permissions = channel.permissions_for(i.guild.me) if i.guild.me else None
+    if not permissions or not permissions.view_channel or not permissions.send_messages:
+        return False, "Annonce non envoyée : NATIX doit voir le salon et pouvoir y envoyer des messages."
+
+    category = store.category(i.guild_id, product["category"])
     shop = store.panels(i.guild_id, "shop")
-    link = (f"\n[Voir la catégorie](https://discord.com/channels/{i.guild_id}/{shop[0]['channel']}/{shop[0]['message']})"
+    link = (f"\n[Voir la boutique](https://discord.com/channels/{i.guild_id}/{shop[0]['channel']}/{shop[0]['message']})"
             if shop else "")
-    ping = {"here": "@here ", "everyone": "@everyone "}.get(s["restock_ping"], "")
-    emoji = E(product["emoji"] or (cat["emoji"] if cat else "nx_box"))
-    text = (f"{ping}**Restock !**\n\n{emoji} **{safe(cat['name'] if cat else 'Boutique', 60)} · "
-            f"{safe(product['name'], 80)}**\n+{added} ajouté{link}")
+    ping = {"here": "@here ", "everyone": "@everyone "}.get(settings["restock_ping"], "")
+    emoji = E(product["emoji"] or (category["emoji"] if category else "nx_box"))
+    text = (f"{ping}**NATIX · Restock / Réapprovisionnement**\n\n"
+            f"{emoji} **{safe(category['name'] if category else 'Boutique', 60)} · "
+            f"{safe(product['name'], 80)}**\n**+{added}** unité(s) disponible(s){link}")
     try:
-        await channel.send(text, allowed_mentions=discord.AllowedMentions(everyone=bool(ping), users=False,
-                                                                           roles=False))
-    except discord.HTTPException:
-        LOG.warning("Annonce de restock impossible dans %s", channel.id)
+        await channel.send(
+            text,
+            allowed_mentions=discord.AllowedMentions(everyone=bool(ping), users=False, roles=False),
+        )
+        return True, f"Annonce envoyée dans {channel.mention}."
+    except (discord.Forbidden, discord.HTTPException) as exc:
+        LOG.warning("Annonce restock impossible dans %s : %s", channel.id, exc)
+        return False, "Annonce non envoyée : permissions ou erreur Discord dans le salon restock."
 
 
 def paypal_contact_message(settings):
@@ -213,21 +232,43 @@ def register(tree: app_commands.CommandTree):
         how = mode.value if mode else "add"
         before = p["stock"]
         if how == "unlimited":
-            store.update_product(i.guild_id, produit, stock=-1)
+            if not store.update_product(i.guild_id, produit, stock=-1):
+                return await reply(i, "Impossible de modifier le stock de ce produit.")
             new = -1
-        elif how == "set" or before == -1:
-            store.update_product(i.guild_id, produit, stock=quantite)
+        elif how == "set":
+            if not store.update_product(i.guild_id, produit, stock=quantite):
+                return await reply(i, "Impossible de modifier le stock de ce produit.")
             new = quantite
         else:
-            if quantite == 0:
-                return await reply(i, "Indique une quantité à ajouter.")
+            if before == -1:
+                return await reply(i, "Ce produit est déjà en stock illimité. Utilise le mode « Définir la valeur exacte » pour changer cela.")
+            if quantite <= 0:
+                return await reply(i, "Indique une quantité supérieure à zéro pour réapprovisionner.")
             new = store.add_stock(i.guild_id, produit, quantite)
+            if new is None:
+                return await reply(i, "Produit introuvable. Le stock n'a pas changé.")
+
         store.audit(i.guild_id, i.user.id, "product:stock", f"{produit} {before}->{new}")
-        await reply(i, None, view=V.notice(f"**{safe(p['name'], 80)}** · {stock_text(before)} → {stock_text(new)}",
-                                           "nx_box"))
-        added = (new - max(before, 0)) if new != -1 and before != -1 else 0
+        # Stock update must refresh already published shop/category panels.
+        try:
+            refreshed = await refresh_panels(i.client, i.guild_id, {"shop", "home"})
+            refresh_info = f"{refreshed} panneau(x) de boutique actualisé(s)." if refreshed else (
+                "Aucun panneau actualisé : publie /panel Boutique ou vérifie les permissions du salon."
+            )
+        except Exception:
+            LOG.exception("Erreur de rafraîchissement après restock %s", produit)
+            refresh_info = "Impossible d'actualiser le panneau automatiquement : republie /panel Boutique."
+
+        added = new - before if new >= 0 and before >= 0 else 0
         if added > 0:
-            await announce_restock(i, p, added)
+            _, announcement = await announce_restock(i, p, added)
+        else:
+            announcement = "Aucune annonce envoyée (aucun ajout de stock)."
+        summary = (
+            f"**{safe(p['name'], 80)}** · {stock_text(before)} → {stock_text(new)}\n"
+            f"✅ {refresh_info}\n{announcement}"
+        )
+        await reply(i, None, view=V.notice(summary, "nx_box"))
 
     @product.command(name="remove", description="Retirer un produit de la boutique")
     @staff_only()

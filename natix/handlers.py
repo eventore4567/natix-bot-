@@ -892,10 +892,19 @@ async def cfg_submit(i, parts):
                         pay_note=(v.get("pay_note") or "").strip(),
                         pay_other=(v.get("pay_other") or "").strip())
     elif section == "restock":
-        ch = first(v, "restock_channel")
+        selected = first(v, "restock_channel")
+        chosen_id = int(selected) if selected else 0
         ping = first(v, "restock_ping") or "none"
-        store.configure(i.guild_id, restock_channel=int(ch) if ch else 0,
-                        restock_ping=ping if ping in ("none", "here", "everyone") else "none")
+        if ping not in ("none", "here", "everyone"):
+            ping = "none"
+        if chosen_id:
+            channel = i.guild.get_channel(chosen_id)
+            if not isinstance(channel, discord.TextChannel):
+                raise Oops("Le salon Restock choisi est introuvable. Sélectionne un salon textuel.")
+            perms = channel.permissions_for(i.guild.me)
+            if not perms.view_channel or not perms.send_messages:
+                raise Oops("NATIX doit pouvoir voir et écrire dans le salon Restock.")
+        store.configure(i.guild_id, restock_channel=chosen_id, restock_ping=ping)
     elif section == "cat":
         key = parts[3]
         name = v["name"].strip()
@@ -930,6 +939,16 @@ async def cfg_submit(i, parts):
         await i.response.send_message(view=view, ephemeral=True)
     if refresh is not None:
         await refresh_panels(i.client, i.guild_id, refresh or None)
+    if section == "restock":
+        saved = store.settings(i.guild_id)
+        channel = saved["restock_channel"]
+        destination = f"<#{channel}>" if channel else "désactivées (aucun salon)"
+        await i.followup.send(
+            f"✅ **Restock enregistré.** Annonces : {destination}. "
+            f"Mention : `{saved['restock_ping']}`. "
+            "Utilise `/product stock` pour ajouter des produits.",
+            ephemeral=True, allowed_mentions=NO_PINGS,
+        )
     if section == "payment":
         # Always confirm the modal was actually submitted and persisted.
         await i.followup.send(
