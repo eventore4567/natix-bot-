@@ -8,6 +8,7 @@ if os.name == 'nt':
             
     
 config = json.load(open("config.json", encoding="utf-8"))
+if os.environ.get("bot_token"): config["bot_token"] = os.environ["bot_token"]
 
 def clear(): #clears the terminal
     os.system('cls' if os.name =='nt' else 'clear')
