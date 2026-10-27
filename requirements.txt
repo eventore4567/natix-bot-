@@ -1,1 +1,11 @@
-discord.py>=2.7.1,<3
+discord
+pystyle
+requests
+py-cord
+httpx
+colorama
+requests_toolbelt
+datetime
+flask
+discord_webhook
+sellpass

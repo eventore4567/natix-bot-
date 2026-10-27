@@ -1,0 +1,17 @@
+Thank you for purchasing Boost Crew's Boost Bot Source Code!
+
+As we have said about setting up support, for extra support we have made an file for you 
+to setup yourself.
+
+1) Setup your config.json
+
+2) Edit your bot.py, rebrand it if you would like to.
+
+3) If you would like to add tokens, go to input folder and you should see 3m_tokens &
+1m_tokens.
+
+4) Once you finished, go to cmd and do python bot.py, make sure to have python installed
+
+Shortly, the bot should be online. Any issues please DM $vapo#0001 with your error.
+
+Boost Crew 2023 | discord.gg/boostcrew
