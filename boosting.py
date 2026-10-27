@@ -1,9 +1,10 @@
 from colorama import Style, Fore
-import datetime, time, json, threading, random, httpx, tls_client, discord
+import datetime, time, json, threading, random, httpx, tls_client, discord, os
 from pathlib import Path
     
 fingerprints = json.load(open("fprints.json", encoding="utf-8"))
 config = json.load(open("config.json", encoding="utf-8"))
+if os.environ.get("bot_token"): config["bot_token"] = os.environ["bot_token"]
 
 client_identifiers = ['safari_ios_16_0', 'safari_ios_15_6', 'safari_ios_15_5', 'safari_16_0', 'safari_15_6_1', 'safari_15_3', 'opera_90', 'opera_89', 'firefox_104', 'firefox_102']
 
