@@ -1,11 +1,1 @@
-pystyle
-requests
-py-cord
-httpx
-colorama
-requests_toolbelt
-datetime
-flask
-discord_webhook
-sellpass
-tls_client
+discord.py>=2.7.1,<3
