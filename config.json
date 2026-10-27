@@ -7,7 +7,7 @@
     "field_name_invite": "",
     "change_server_nick": true,
     "server_nick": "",
-    "guildID": ,
+    "guildID": "",
     "order_log_webhook": "",
     "boost_log_webhook": "",
     "boost_failed_log_webhook": ""
